@@ -1,0 +1,11 @@
+--- MAINTAINERS	(revision 0f030fd569788084912f092fc08e278d5c2a1b78)
++++ MAINTAINERS	(date 1740124333344)
+@@ -22857,7 +22857,7 @@
+ M:	Nick Terrell <terrelln@fb.com>
+ S:	Maintained
+ B:	https://github.com/facebook/zstd/issues
+-T:	git git://github.com/terrelln/linux.git
++T:	git https://github.com/terrelln/linux.git
+ F:	include/linux/zstd*
+ F:	lib/zstd/
+ F:	lib/decompress_unzstd.c
