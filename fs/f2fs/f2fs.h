@@ -1703,7 +1703,7 @@ static void inline deserialize_decompress_index(decompress_index_t val,
 	di->ofs = (val & (0xfff << DI_OFS_OFFS)) >> DI_OFS_OFFS;
 }
 
-#define MAX_BLKS_PER_CLUSTER		(1 << 3) // MAX_COMPRESS_LOG_SIZE
+#define MAX_BLKS_PER_CLUSTER		(1 << 3)	/* MUST stay == 1 << MAX_SUPPORTED_COMPRESS_LOG_SIZE */
 
 #define CLEAR_IFLAG_IF_SET(inode, flag)                                        \
 	if (F2FS_I(inode)->i_flags & flag) {                                   \
@@ -1752,6 +1752,7 @@ struct compress_io_ctx {
 struct decompress_io_ctx {
 	u32 magic;			/* magic number to indicate page is compressed */
 	struct inode *inode;		/* inode the context belong to */
+	struct f2fs_sb_info *sbi;	/* f2fs_sb_info pointer */
 	pgoff_t cluster_idx;		/* cluster index number */
 	unsigned int cluster_size;	/* page count in cluster */
 	unsigned int log_cluster_size;	/* log of cluster size */
@@ -1795,6 +1796,10 @@ struct decompress_io_ctx {
 
 	bool failed;			/* IO error occurred before decompression? */
 	bool need_verity;		/* need fs-verity verification after decompression? */
+	unsigned char compress_algorithm;	/* backup algorithm type */
+	unsigned char dic_layout;		/* cached compress layout, safe on late-free path. */
+					/* Set explicitly in f2fs_alloc_dic() right after the
+					 * GFP_F2FS_ZERO alloc, so it never relies on zeroing. */
 	void *private;			/* payload buffer for specified decompression algorithm */
 	void *private2;			/* extra payload buffer */
 	struct work_struct verity_work;	/* work to verify the decompressed pages */
@@ -1809,6 +1814,13 @@ struct decompress_io_ctx {
 
 #define NULL_CLUSTER			((unsigned int)(~0))
 #define MIN_COMPRESS_LOG_SIZE		2
+/*
+ * The compressed-cluster arrays (rpages/cpages/tpages/di/inplace_io) have
+ * MAX_BLKS_PER_CLUSTER (= 8) fixed entries, so a log size above
+ * ilog2(MAX_BLKS_PER_CLUSTER) = 3 would overflow them.  MAX_COMPRESS_LOG_SIZE
+ * is what the ON-DISK FORMAT allows; this is what the CODE can hold.
+ */
+#define MAX_SUPPORTED_COMPRESS_LOG_SIZE	3
 #define MAX_COMPRESS_LOG_SIZE		8
 #define MAX_COMPRESS_WINDOW_SIZE(log_size)	((PAGE_SIZE) << (log_size))
 
@@ -4212,7 +4224,7 @@ bool f2fs_is_checkpointed_data(struct f2fs_sb_info *sbi, block_t blkaddr);
 int f2fs_start_discard_thread(struct f2fs_sb_info *sbi);
 void f2fs_drop_discard_cmd(struct f2fs_sb_info *sbi);
 void f2fs_stop_discard_thread(struct f2fs_sb_info *sbi);
-bool f2fs_issue_discard_timeout(struct f2fs_sb_info *sbi);
+bool f2fs_issue_discard_timeout(struct f2fs_sb_info *sbi, bool need_check);
 void f2fs_clear_prefree_segments(struct f2fs_sb_info *sbi,
 					struct cp_control *cpc);
 void f2fs_dirty_to_prefree(struct f2fs_sb_info *sbi);

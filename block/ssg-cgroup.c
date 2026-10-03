@@ -124,18 +124,24 @@ unsigned int ssg_blkcg_shallow_depth(struct request_queue *q)
 	struct blkcg_gq *blkg;
 	struct ssg_blkg *ssg_blkg;
 
+	unsigned int depth = 0;
+
 	rcu_read_lock();
 	blkg = blkg_lookup(css_to_blkcg(curr_css()), q);
 	ssg_blkg = BLKG_TO_SSG_BLKG(blkg);
+	/*
+	 * blkg is freed via call_rcu()/workqueue (blkg_release ->
+	 * __blkg_release -> blkg_free_workfn -> pd_free_fn -> kfree of the
+	 * ssg_blkg), so its policy data may only be dereferenced while we
+	 * still hold the RCU read lock.  Read everything here, not after
+	 * rcu_read_unlock().
+	 */
+	if (!IS_ERR_OR_NULL(ssg_blkg) &&
+	    atomic_read(&ssg_blkg->current_rqs) >= ssg_blkg->max_available_rqs)
+		depth = ssg_blkg->shallow_depth;
 	rcu_read_unlock();
 
-	if (IS_ERR_OR_NULL(ssg_blkg))
-		return 0;
-
-	if (atomic_read(&ssg_blkg->current_rqs) < ssg_blkg->max_available_rqs)
-		return 0;
-
-	return ssg_blkg->shallow_depth;
+	return depth;
 }
 
 void ssg_blkcg_depth_updated(struct blk_mq_hw_ctx *hctx)

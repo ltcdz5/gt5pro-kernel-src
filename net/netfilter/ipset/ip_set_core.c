@@ -1482,12 +1482,20 @@ ip_set_dump_done(struct netlink_callback *cb)
 		struct ip_set_net *inst =
 			(struct ip_set_net *)cb->args[IPSET_CB_NET];
 		ip_set_id_t index = (ip_set_id_t)cb->args[IPSET_CB_INDEX];
-		struct ip_set *set = ip_set_ref_netlink(inst, index);
+		struct ip_set *set;
 
+		/* ip_set_ref_netlink() dereferences inst->ip_set_list without
+		 * taking a reference: the array can be replaced and kvfree()d
+		 * by ip_set_net_resize() right after synchronize_net(), which
+		 * does not wait for readers that are not in an RCU section.
+		 */
+		rcu_read_lock();
+		set = ip_set_ref_netlink(inst, index);
 		if (set->variant->uref)
 			set->variant->uref(set, cb, false);
 		pr_debug("release set %s\n", set->name);
 		__ip_set_put_netlink(set);
+		rcu_read_unlock();
 	}
 	return 0;
 }
@@ -1687,11 +1695,16 @@ next_set:
 release_refcount:
 	/* If there was an error or set is done, release set */
 	if (ret || !cb->args[IPSET_CB_ARG0]) {
+		/* Same as in ip_set_dump_done(): keep the RCU section open
+		 * while touching the (possibly replaced) ip_set_list array.
+		 */
+		rcu_read_lock();
 		set = ip_set_ref_netlink(inst, index);
 		if (set->variant->uref)
 			set->variant->uref(set, cb, false);
 		pr_debug("release set %s\n", set->name);
 		__ip_set_put_netlink(set);
+		rcu_read_unlock();
 		cb->args[IPSET_CB_ARG0] = 0;
 	}
 out:

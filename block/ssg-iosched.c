@@ -758,12 +758,15 @@ static ssize_t ssg_var_show(int var, char *page)
 	return sprintf(page, "%d\n", var);
 }
 
-static void ssg_var_store(int *var, const char *page)
+static int ssg_var_store(int *var, const char *page)
 {
 	long val;
 
-	if (!kstrtol(page, 10, &val))
-		*var = val;
+	if (kstrtol(page, 10, &val))
+		return -EINVAL;
+
+	*var = val;
+	return 0;
 }
 
 #define SHOW_FUNCTION(__FUNC, __VAR, __CONV)				\
@@ -790,7 +793,8 @@ static ssize_t __FUNC(struct elevator_queue *e, const char *page, size_t count)	
 {									\
 	struct ssg_data *ssg = e->elevator_data;			\
 	int __data;							\
-	ssg_var_store(&__data, (page));					\
+	if (ssg_var_store(&__data, (page)))				\
+		return -EINVAL;						\
 	if (__data < (MIN))						\
 		__data = (MIN);						\
 	else if (__data > (MAX))					\

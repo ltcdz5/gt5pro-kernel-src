@@ -197,12 +197,14 @@
 11:
 	/* Copy_offset_lt_32: */
 	ldr	q1, [copy_from_ptr]
+	cmp	offset , #16
+	b.hs	15f
 	add	tmp, permtable_addr, offset, lsl #5
 	ldp	q2, q3, [tmp]
 	tbl	v0.16b, {v1.16b}, v2.16b
 	tbl	v1.16b, {v1.16b}, v3.16b
-	cmp     offset , #16
-	b.lo    12f
+	b	12f
+15:
 	ldp     q0, q1, [copy_from_ptr]
 
 12:
