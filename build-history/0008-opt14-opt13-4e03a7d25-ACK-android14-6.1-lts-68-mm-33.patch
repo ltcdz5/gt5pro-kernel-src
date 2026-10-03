@@ -1,0 +1,2337 @@
+From bc26f54a57db792c4aec797bb80cd5177b824523 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@users.noreply.github.com>
+Date: Thu, 1 Oct 2026 23:42:34 +0800
+Subject: [PATCH 08/33] =?UTF-8?q?opt14=20=3D=20opt13(4e03a7d25)=20+=20ACK?=
+ =?UTF-8?q?=20android14-6.1-lts=2068=20=E6=9D=A1=E6=8F=90=E4=BA=A4(mm=2033?=
+ =?UTF-8?q?=20/=20f2fs=2013=20/=20sched=204=20/=20block=204=20/=20erofs=20?=
+ =?UTF-8?q?2=20/=20=E5=A4=B4=2010=20=E7=AD=89)=EF=BC=8C=E5=8F=96=E8=87=AA?=
+ =?UTF-8?q?=E6=9D=83=E5=A8=81=E6=BA=90=20android.googlesource.com=EF=BC=88?=
+ =?UTF-8?q?=E6=AD=A4=E5=89=8D=E8=AF=AF=E7=94=A8=E5=86=BB=E7=BB=93=E7=9A=84?=
+ =?UTF-8?q?=20GitHub=20=E9=95=9C=E5=83=8F=E5=BE=97=E5=87=BA'=E4=B8=8A?=
+ =?UTF-8?q?=E6=B8=B8=E5=B0=81=E9=A1=B6'=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ block/bdev.c                           |  4 --
+ block/blk-sysfs.c                      |  2 +
+ block/fops.c                           | 45 ++++++++++++-
+ block/genhd.c                          |  2 +-
+ drivers/block/rnbd/rnbd-clt.c          | 13 ++--
+ drivers/block/rnbd/rnbd-clt.h          |  2 +-
+ fs/erofs/decompressor.c                |  1 +
+ fs/erofs/zdata.c                       |  7 +-
+ fs/f2fs/checkpoint.c                   | 14 +++-
+ fs/f2fs/compress.c                     | 14 +++-
+ fs/f2fs/data.c                         | 15 +++--
+ fs/f2fs/inline.c                       | 13 ++--
+ fs/f2fs/inode.c                        | 11 +++-
+ fs/f2fs/namei.c                        |  6 +-
+ fs/f2fs/node.c                         | 18 ++++--
+ fs/f2fs/segment.c                      |  4 +-
+ fs/f2fs/super.c                        | 46 ++++++++------
+ fs/f2fs/xattr.c                        |  7 +-
+ include/linux/blk_types.h              |  6 +-
+ include/linux/damon.h                  |  1 +
+ include/linux/f2fs_fs.h                |  3 +
+ include/linux/hugetlb.h                | 10 +--
+ include/linux/mm.h                     |  5 +-
+ include/linux/sched/isolation.h        | 12 ++++
+ include/linux/swapops.h                | 20 ++++--
+ include/trace/events/kmem.h            |  8 ++-
+ kernel/sched/cpudeadline.c             | 34 +++-------
+ kernel/sched/cpudeadline.h             |  4 +-
+ kernel/sched/deadline.c                |  8 +--
+ kernel/sched/fair.c                    | 22 ++++---
+ kernel/sched/rt.c                      |  5 ++
+ mm/backing-dev.c                       |  5 +-
+ mm/balloon_compaction.c                |  6 --
+ mm/damon/core-test.h                   | 88 +++++++++++++++++++++++++-
+ mm/damon/core.c                        | 18 ++++++
+ mm/damon/ops-common.c                  |  4 +-
+ mm/damon/sysfs.c                       |  8 ++-
+ mm/damon/vaddr-test.h                  | 26 +++++++-
+ mm/gup.c                               |  2 +-
+ mm/huge_memory.c                       |  2 +
+ mm/hugetlb.c                           | 41 ++++++++----
+ mm/kasan/init.c                        |  8 +--
+ mm/kfence/core.c                       | 45 +++++++++++--
+ mm/kmsan/shadow.c                      |  3 +-
+ mm/memory-failure.c                    | 73 ++++++++++++---------
+ mm/memory.c                            |  2 +-
+ mm/memory_hotplug.c                    |  2 +-
+ mm/mempolicy.c                         |  4 +-
+ mm/migrate.c                           |  4 +-
+ mm/mprotect.c                          | 26 ++++----
+ mm/page_alloc.c                        | 49 ++++++++++++--
+ mm/rmap.c                              | 20 ++----
+ mm/secretmem.c                         |  2 +-
+ mm/truncate.c                          | 27 +++++++-
+ tools/testing/selftests/vm/hmm-tests.c | 50 +++++++++++++++
+ 55 files changed, 640 insertions(+), 237 deletions(-)
+
+diff --git a/block/bdev.c b/block/bdev.c
+index ef60d9912717..a0a0982bdf9f 100644
+--- a/block/bdev.c
++++ b/block/bdev.c
+@@ -466,16 +466,12 @@ EXPORT_SYMBOL_GPL(blockdev_superblock);
+ 
+ void __init bdev_cache_init(void)
+ {
+-	int err;
+ 	static struct vfsmount *bd_mnt;
+ 
+ 	bdev_cachep = kmem_cache_create("bdev_cache", sizeof(struct bdev_inode),
+ 			0, (SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT|
+ 				SLAB_MEM_SPREAD|SLAB_ACCOUNT|SLAB_PANIC),
+ 			init_once);
+-	err = register_filesystem(&bd_type);
+-	if (err)
+-		panic("Cannot register bdev pseudo-fs");
+ 	bd_mnt = kern_mount(&bd_type);
+ 	if (IS_ERR(bd_mnt))
+ 		panic("Cannot create bdev pseudo-fs");
+diff --git a/block/blk-sysfs.c b/block/blk-sysfs.c
+index 3231b2632d0a..b8a85504b6a0 100644
+--- a/block/blk-sysfs.c
++++ b/block/blk-sysfs.c
+@@ -869,6 +869,8 @@ int blk_register_queue(struct gendisk *disk)
+ 	elv_unregister_queue(q);
+ 	disk_unregister_independent_access_ranges(disk);
+ 	mutex_unlock(&q->sysfs_lock);
++	if (queue_is_mq(q))
++		blk_mq_sysfs_unregister(disk);
+ 	mutex_unlock(&q->sysfs_dir_lock);
+ 	kobject_del(&q->kobj);
+ 
+diff --git a/block/fops.c b/block/fops.c
+index b02fe200c3ec..fb7a57ed42d9 100644
+--- a/block/fops.c
++++ b/block/fops.c
+@@ -515,6 +515,30 @@ static int blkdev_close(struct inode *inode, struct file *filp)
+ 	return 0;
+ }
+ 
++static ssize_t
++blkdev_direct_write(struct kiocb *iocb, struct iov_iter *from)
++{
++	size_t count = iov_iter_count(from);
++	ssize_t written;
++
++	written = kiocb_invalidate_pages(iocb, count);
++	if (written) {
++		if (written == -EBUSY)
++			return 0;
++		return written;
++	}
++
++	written = blkdev_direct_IO(iocb, from);
++	if (written > 0) {
++		kiocb_invalidate_post_direct_write(iocb, count);
++		iocb->ki_pos += written;
++		count -= written;
++	}
++	if (written != -EIOCBQUEUED)
++		iov_iter_revert(from, count - iov_iter_count(from));
++	return written;
++}
++
+ /*
+  * Write data to the block device.  Only intended for the block device itself
+  * and the raw driver which basically is a fake block device.
+@@ -524,7 +548,8 @@ static int blkdev_close(struct inode *inode, struct file *filp)
+  */
+ static ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ {
+-	struct block_device *bdev = iocb->ki_filp->private_data;
++	struct file *file = iocb->ki_filp;
++	struct block_device *bdev = file->private_data;
+ 	struct inode *bd_inode = bdev->bd_inode;
+ 	loff_t size = bdev_nr_bytes(bdev);
+ 	struct blk_plug plug;
+@@ -553,7 +578,23 @@ static ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ 	}
+ 
+ 	blk_start_plug(&plug);
+-	ret = __generic_file_write_iter(iocb, from);
++	ret = file_remove_privs(file);
++	if (ret)
++		return ret;
++
++	ret = file_update_time(file);
++	if (ret)
++		return ret;
++
++	if (iocb->ki_flags & IOCB_DIRECT) {
++		ret = blkdev_direct_write(iocb, from);
++		if (ret >= 0 && iov_iter_count(from))
++			ret = direct_write_fallback(iocb, from, ret,
++					generic_perform_write(iocb, from));
++	} else {
++		ret = generic_perform_write(iocb, from);
++	}
++
+ 	if (ret > 0)
+ 		ret = generic_write_sync(iocb, ret);
+ 	iov_iter_reexpand(from, iov_iter_count(from) + shorted);
+diff --git a/block/genhd.c b/block/genhd.c
+index 7102a044a3d5..c9dc2f2cfb32 100644
+--- a/block/genhd.c
++++ b/block/genhd.c
+@@ -90,7 +90,7 @@ bool set_capacity_and_notify(struct gendisk *disk, sector_t size)
+ 	    (disk->flags & GENHD_FL_HIDDEN))
+ 		return false;
+ 
+-	pr_info("%s: detected capacity change from %lld to %lld\n",
++	pr_info_ratelimited("%s: detected capacity change from %lld to %lld\n",
+ 		disk->disk_name, capacity, size);
+ 
+ 	/*
+diff --git a/drivers/block/rnbd/rnbd-clt.c b/drivers/block/rnbd/rnbd-clt.c
+index 5eb8c7855970..4291bdbe36ba 100644
+--- a/drivers/block/rnbd/rnbd-clt.c
++++ b/drivers/block/rnbd/rnbd-clt.c
+@@ -1440,9 +1440,11 @@ static struct rnbd_clt_dev *init_dev(struct rnbd_clt_session *sess,
+ 		goto out_alloc;
+ 	}
+ 
+-	ret = ida_alloc_max(&index_ida, (1 << (MINORBITS - RNBD_PART_BITS)) - 1,
+-			    GFP_KERNEL);
+-	if (ret < 0) {
++	dev->clt_device_id = ida_alloc_max(&index_ida,
++					   (1 << (MINORBITS - RNBD_PART_BITS)) - 1,
++					   GFP_KERNEL);
++	if (dev->clt_device_id < 0) {
++		ret = dev->clt_device_id;
+ 		pr_err("Failed to initialize device '%s' from session %s, allocating idr failed, err: %d\n",
+ 		       pathname, sess->sessname, ret);
+ 		goto out_queues;
+@@ -1451,10 +1453,9 @@ static struct rnbd_clt_dev *init_dev(struct rnbd_clt_session *sess,
+ 	dev->pathname = kstrdup(pathname, GFP_KERNEL);
+ 	if (!dev->pathname) {
+ 		ret = -ENOMEM;
+-		goto out_queues;
++		goto out_ida;
+ 	}
+ 
+-	dev->clt_device_id	= ret;
+ 	dev->sess		= sess;
+ 	dev->access_mode	= access_mode;
+ 	dev->nr_poll_queues	= nr_poll_queues;
+@@ -1470,6 +1471,8 @@ static struct rnbd_clt_dev *init_dev(struct rnbd_clt_session *sess,
+ 
+ 	return dev;
+ 
++out_ida:
++	ida_free(&index_ida, dev->clt_device_id);
+ out_queues:
+ 	kfree(dev->hw_queues);
+ out_alloc:
+diff --git a/drivers/block/rnbd/rnbd-clt.h b/drivers/block/rnbd/rnbd-clt.h
+index a48e040abe63..fbc1ed766025 100644
+--- a/drivers/block/rnbd/rnbd-clt.h
++++ b/drivers/block/rnbd/rnbd-clt.h
+@@ -112,7 +112,7 @@ struct rnbd_clt_dev {
+ 	struct rnbd_queue	*hw_queues;
+ 	u32			device_id;
+ 	/* local Idr index - used to track minor number allocations. */
+-	u32			clt_device_id;
++	int			clt_device_id;
+ 	struct mutex		lock;
+ 	enum rnbd_clt_dev_state	dev_state;
+ 	refcount_t		refcount;
+diff --git a/fs/erofs/decompressor.c b/fs/erofs/decompressor.c
+index 7d11d29fe4c8..44bace2b0d59 100644
+--- a/fs/erofs/decompressor.c
++++ b/fs/erofs/decompressor.c
+@@ -134,6 +134,7 @@ static void *z_erofs_lz4_handle_overlap(struct z_erofs_lz4_decompress_ctx *ctx,
+ 	if (rq->inplace_io) {
+ 		omargin = PAGE_ALIGN(ctx->oend) - ctx->oend;
+ 		if (rq->partial_decoding || !may_inplace ||
++		    ctx->outpages < ctx->inpages ||
+ 		    omargin < LZ4_DECOMPRESS_INPLACE_MARGIN(rq->inputsize))
+ 			goto docopy;
+ 
+diff --git a/fs/erofs/zdata.c b/fs/erofs/zdata.c
+index 29f41f7dfa5c..50bd36e1ff0b 100755
+--- a/fs/erofs/zdata.c
++++ b/fs/erofs/zdata.c
+@@ -1738,11 +1738,10 @@ static void z_erofs_submit_queue(struct z_erofs_decompress_frontend *f,
+ 			move_to_bypass_jobqueue(pcl, qtail, owned_head);
+ 	} while (owned_head != Z_EROFS_PCLUSTER_TAIL);
+ 
+-	if (bio) {
++	if (bio)
+ 		submit_bio(bio);
+-		if (memstall)
+-			psi_memstall_leave(&pflags);
+-	}
++	if (memstall)
++		psi_memstall_leave(&pflags);
+ 
+ 	/*
+ 	 * although background is preferred, no one is pending for submission.
+diff --git a/fs/f2fs/checkpoint.c b/fs/f2fs/checkpoint.c
+index a93be146bc23..6d2125e6a5b4 100644
+--- a/fs/f2fs/checkpoint.c
++++ b/fs/f2fs/checkpoint.c
+@@ -772,6 +772,7 @@ int f2fs_recover_orphan_inodes(struct f2fs_sb_info *sbi)
+ 	for (i = 0; i < orphan_blocks; i++) {
+ 		struct page *page;
+ 		struct f2fs_orphan_block *orphan_blk;
++		unsigned int entry_count;
+ 
+ 		page = f2fs_get_meta_page(sbi, start_blk + i);
+ 		if (IS_ERR(page)) {
+@@ -780,7 +781,18 @@ int f2fs_recover_orphan_inodes(struct f2fs_sb_info *sbi)
+ 		}
+ 
+ 		orphan_blk = (struct f2fs_orphan_block *)page_address(page);
+-		for (j = 0; j < le32_to_cpu(orphan_blk->entry_count); j++) {
++		entry_count = le32_to_cpu(orphan_blk->entry_count);
++		if (entry_count > F2FS_ORPHANS_PER_BLOCK) {
++			f2fs_err(sbi, "invalid orphan inode entry count %u",
++				 entry_count);
++			set_sbi_flag(sbi, SBI_NEED_FSCK);
++			f2fs_handle_error(sbi, ERROR_INCONSISTENT_ORPHAN);
++			err = -EFSCORRUPTED;
++			f2fs_put_page(page, 1);
++			goto out;
++		}
++
++		for (j = 0; j < entry_count; j++) {
+ 			nid_t ino = le32_to_cpu(orphan_blk->ino[j]);
+ 
+ 			err = recover_orphan_inode(sbi, ino);
+diff --git a/fs/f2fs/compress.c b/fs/f2fs/compress.c
+index 4e9f3f5909ba..c468c50c6332 100755
+--- a/fs/f2fs/compress.c
++++ b/fs/f2fs/compress.c
+@@ -2080,10 +2080,10 @@ void f2fs_compress_write_end_io(struct bio *bio, struct page *page)
+ 
+ 	f2fs_compress_free_page(page);
+ 
+-	dec_page_count(sbi, type);
+-
+-	if (atomic_dec_return(&cic->pending_pages))
++	if (atomic_dec_return(&cic->pending_pages)) {
++		dec_page_count(sbi, type);
+ 		return;
++	}
+ 
+ 	for (i = 0; i < cic->nr_rpages; i++) {
+ 		WARN_ON(!cic->rpages[i]);
+@@ -2093,6 +2093,14 @@ void f2fs_compress_write_end_io(struct bio *bio, struct page *page)
+ 
+ 	page_array_free(cic->inode, cic->rpages, cic->nr_rpages);
+ 	kmem_cache_free(cic_entry_slab, cic);
++
++	/*
++	 * Make sure dec_page_count() is the last access to sbi.
++	 * Once it drops the F2FS_WB_CP_DATA counter to zero, the
++	 * unmount thread can proceed to destroy sbi and
++	 * sbi->page_array_slab.
++	 */
++	dec_page_count(sbi, type);
+ }
+ 
+ static int f2fs_write_raw_pages(struct compress_ctx *cc,
+diff --git a/fs/f2fs/data.c b/fs/f2fs/data.c
+index e7b9bdef33e7..df3c99c68aa2 100755
+--- a/fs/f2fs/data.c
++++ b/fs/f2fs/data.c
+@@ -463,14 +463,20 @@ static void f2fs_write_end_io(struct bio *bio)
+ 					page->index != nid_of_node(page));
+ 
+ 		dec_page_count(sbi, type);
++
++		/*
++		 * we should access sbi before end_page_writeback() to
++		 * avoid racing w/ kill_f2fs_super()
++		 */
++		if (type == F2FS_WB_CP_DATA && !get_pages(sbi, type) &&
++				wq_has_sleeper(&sbi->cp_wait))
++			wake_up(&sbi->cp_wait);
++
+ 		if (f2fs_in_warm_node_list(sbi, page))
+ 			f2fs_del_fsync_node_entry(sbi, page);
+ 		clear_page_private_gcing(page);
+ 		end_page_writeback(page);
+ 	}
+-	if (!get_pages(sbi, F2FS_WB_CP_DATA) &&
+-				wq_has_sleeper(&sbi->cp_wait))
+-		wake_up(&sbi->cp_wait);
+ 
+ 	bio_put(bio);
+ }
+@@ -1852,7 +1858,8 @@ static bool f2fs_map_blocks_cached(struct inode *inode,
+ 		f2fs_wait_on_block_writeback_range(inode,
+ 					map->m_pblk, map->m_len);
+ 
+-	if (f2fs_allow_multi_device_dio(sbi, flag)) {
++	map->m_multidev_dio = f2fs_allow_multi_device_dio(sbi, flag);
++	if (map->m_multidev_dio) {
+ 		int bidx = f2fs_target_device_index(sbi, map->m_pblk);
+ 		struct f2fs_dev_info *dev = &sbi->devs[bidx];
+ 
+diff --git a/fs/f2fs/inline.c b/fs/f2fs/inline.c
+index d34943bc9b96..2351e45e2a7e 100644
+--- a/fs/f2fs/inline.c
++++ b/fs/f2fs/inline.c
+@@ -773,7 +773,7 @@ int f2fs_read_inline_dir(struct file *file, struct dir_context *ctx,
+ int f2fs_inline_data_fiemap(struct inode *inode,
+ 		struct fiemap_extent_info *fieinfo, __u64 start, __u64 len)
+ {
+-	__u64 byteaddr, ilen;
++	__u64 byteaddr = 0, ilen;
+ 	__u32 flags = FIEMAP_EXTENT_DATA_INLINE | FIEMAP_EXTENT_NOT_ALIGNED |
+ 		FIEMAP_EXTENT_LAST;
+ 	struct node_info ni;
+@@ -806,9 +806,14 @@ int f2fs_inline_data_fiemap(struct inode *inode,
+ 	if (err)
+ 		goto out;
+ 
+-	byteaddr = (__u64)ni.blk_addr << inode->i_sb->s_blocksize_bits;
+-	byteaddr += (char *)inline_data_addr(inode, ipage) -
+-					(char *)F2FS_INODE(ipage);
++	if (__is_valid_data_blkaddr(ni.blk_addr)) {
++		byteaddr = (__u64)ni.blk_addr << inode->i_sb->s_blocksize_bits;
++		byteaddr += (char *)inline_data_addr(inode, ipage) -
++						(char *)F2FS_INODE(ipage);
++	} else {
++		f2fs_bug_on(F2FS_I_SB(inode), ni.blk_addr != NEW_ADDR);
++		flags |= FIEMAP_EXTENT_DELALLOC | FIEMAP_EXTENT_UNKNOWN;
++	}
+ 	err = fiemap_fill_next_extent(fieinfo, start, byteaddr, ilen, flags);
+ 	trace_f2fs_fiemap(inode, start, byteaddr, ilen, flags, err);
+ out:
+diff --git a/fs/f2fs/inode.c b/fs/f2fs/inode.c
+index 1d10ae7ced83..a5007767732f 100644
+--- a/fs/f2fs/inode.c
++++ b/fs/f2fs/inode.c
+@@ -540,8 +540,13 @@ static int do_read_inode(struct inode *inode)
+ 
+ static bool is_meta_ino(struct f2fs_sb_info *sbi, unsigned int ino)
+ {
+-	return ino == F2FS_NODE_INO(sbi) || ino == F2FS_META_INO(sbi) ||
+-		ino == F2FS_COMPRESS_INO(sbi);
++	if (ino == F2FS_NODE_INO(sbi) || ino == F2FS_META_INO(sbi))
++		return true;
++#ifdef CONFIG_F2FS_FS_COMPRESSION
++	if (test_opt(sbi, COMPRESS_CACHE) && ino == F2FS_COMPRESS_INO(sbi))
++		return true;
++#endif
++	return false;
+ }
+ 
+ struct inode *f2fs_iget(struct super_block *sb, unsigned long ino)
+@@ -669,7 +674,7 @@ void f2fs_update_inode(struct inode *inode, struct page *node_page)
+ 	ri->i_uid = cpu_to_le32(i_uid_read(inode));
+ 	ri->i_gid = cpu_to_le32(i_gid_read(inode));
+ 	ri->i_links = cpu_to_le32(inode->i_nlink);
+-	ri->i_blocks = cpu_to_le64(SECTOR_TO_BLOCK(inode->i_blocks) + 1);
++	ri->i_blocks = cpu_to_le64(SECTOR_TO_BLOCK(READ_ONCE(inode->i_blocks)) + 1);
+ 
+ 	if (!f2fs_is_atomic_file(inode) ||
+ 			is_inode_flag_set(inode, FI_ATOMIC_COMMITTED))
+diff --git a/fs/f2fs/namei.c b/fs/f2fs/namei.c
+index bffc4dff277d..41df30225a3a 100644
+--- a/fs/f2fs/namei.c
++++ b/fs/f2fs/namei.c
+@@ -1057,9 +1057,11 @@ static int f2fs_rename(struct user_namespace *mnt_userns, struct inode *old_dir,
+ 	if (whiteout) {
+ 		set_inode_flag(whiteout, FI_INC_LINK);
+ 		err = f2fs_add_link(old_dentry, whiteout);
+-		if (err)
++		if (err) {
++			d_invalidate(old_dentry);
++			d_invalidate(new_dentry);
+ 			goto put_out_dir;
+-
++		}
+ 		spin_lock(&whiteout->i_lock);
+ 		whiteout->i_state &= ~I_LINKABLE;
+ 		spin_unlock(&whiteout->i_lock);
+diff --git a/fs/f2fs/node.c b/fs/f2fs/node.c
+index c16b5149f4a1..5290733722cb 100644
+--- a/fs/f2fs/node.c
++++ b/fs/f2fs/node.c
+@@ -1694,8 +1694,13 @@ static int __write_node_page(struct page *page, bool atomic, bool *submitted,
+ 		goto redirty_out;
+ 	}
+ 
+-	if (atomic && !test_opt(sbi, NOBARRIER) && !f2fs_sb_has_blkzoned(sbi))
+-		fio.op_flags |= REQ_PREFLUSH | REQ_FUA;
++	if (atomic) {
++		if (!test_opt(sbi, NOBARRIER) && !f2fs_sb_has_blkzoned(sbi))
++			fio.op_flags |= REQ_PREFLUSH | REQ_FUA;
++		if (IS_INODE(page))
++			set_dentry_mark(page,
++				f2fs_need_dentry_mark(sbi, ino_of_node(page)));
++	}
+ 
+ 	/* should add to global list before clearing PAGECACHE status */
+ 	if (f2fs_in_warm_node_list(sbi, page)) {
+@@ -1849,8 +1854,9 @@ int f2fs_fsync_node_pages(struct f2fs_sb_info *sbi, struct inode *inode,
+ 					if (is_inode_flag_set(inode,
+ 								FI_DIRTY_INODE))
+ 						f2fs_update_inode(inode, page);
+-					set_dentry_mark(page,
+-						f2fs_need_dentry_mark(sbi, ino));
++					if (!atomic)
++						set_dentry_mark(page,
++							f2fs_need_dentry_mark(sbi, ino));
+ 				}
+ 				/* may be written by other thread */
+ 				if (!PageDirty(page))
+@@ -3436,10 +3442,10 @@ void f2fs_destroy_node_manager(struct f2fs_sb_info *sbi)
+ 	}
+ 	kvfree(nm_i->free_nid_count);
+ 
+-	kvfree(nm_i->nat_bitmap);
++	kfree(nm_i->nat_bitmap);
+ 	kvfree(nm_i->nat_bits);
+ #ifdef CONFIG_F2FS_CHECK_FS
+-	kvfree(nm_i->nat_bitmap_mir);
++	kfree(nm_i->nat_bitmap_mir);
+ #endif
+ 	sbi->nm_info = NULL;
+ 	kfree(nm_i);
+diff --git a/fs/f2fs/segment.c b/fs/f2fs/segment.c
+index 0d25967110e1..2c1625aaefb2 100755
+--- a/fs/f2fs/segment.c
++++ b/fs/f2fs/segment.c
+@@ -5481,9 +5481,9 @@ static void destroy_sit_info(struct f2fs_sb_info *sbi)
+ 	kvfree(sit_i->dirty_sentries_bitmap);
+ 
+ 	SM_I(sbi)->sit_info = NULL;
+-	kvfree(sit_i->sit_bitmap);
++	kfree(sit_i->sit_bitmap);
+ #ifdef CONFIG_F2FS_CHECK_FS
+-	kvfree(sit_i->sit_bitmap_mir);
++	kfree(sit_i->sit_bitmap_mir);
+ 	kvfree(sit_i->invalid_segmap);
+ #endif
+ 	kfree(sit_i);
+diff --git a/fs/f2fs/super.c b/fs/f2fs/super.c
+index 0ba66a306e34..637b125710e0 100755
+--- a/fs/f2fs/super.c
++++ b/fs/f2fs/super.c
+@@ -1761,7 +1761,7 @@ static void f2fs_put_super(struct super_block *sb)
+ 	destroy_percpu_info(sbi);
+ 	f2fs_destroy_iostat(sbi);
+ 	for (i = 0; i < NR_PAGE_TYPE; i++)
+-		kvfree(sbi->write_io[i]);
++		kfree(sbi->write_io[i]);
+ #if IS_ENABLED(CONFIG_UNICODE)
+ 	utf8_unload(sb->s_encoding);
+ #endif
+@@ -2338,9 +2338,10 @@ static int f2fs_disable_checkpoint(struct f2fs_sb_info *sbi)
+ 	return err;
+ }
+ 
+-static void f2fs_enable_checkpoint(struct f2fs_sb_info *sbi)
++static int f2fs_enable_checkpoint(struct f2fs_sb_info *sbi)
+ {
+ 	int retry = DEFAULT_RETRY_IO_COUNT;
++	int ret;
+ 
+ 	/* we should flush all the data to keep data consistency */
+ 	do {
+@@ -2358,10 +2359,14 @@ static void f2fs_enable_checkpoint(struct f2fs_sb_info *sbi)
+ 	set_sbi_flag(sbi, SBI_IS_DIRTY);
+ 	f2fs_up_write(&sbi->gc_lock);
+ 
+-	f2fs_sync_fs(sbi->sb, 1);
++	ret = f2fs_sync_fs(sbi->sb, 1);
++	if (ret)
++		f2fs_err(sbi, "%s sync_fs failed, ret: %d", __func__, ret);
+ 
+ 	/* Let's ensure there's no pending checkpoint anymore */
+ 	f2fs_flush_ckpt_thread(sbi);
++
++	return ret;
+ }
+ 
+ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
+@@ -2586,7 +2591,9 @@ static int f2fs_remount(struct super_block *sb, int *flags, char *data)
+ 			if (err)
+ 				goto restore_discard;
+ 		} else {
+-			f2fs_enable_checkpoint(sbi);
++			err = f2fs_enable_checkpoint(sbi);
++			if (err)
++				goto restore_discard;
+ 		}
+ 	}
+ 
+@@ -4681,11 +4688,15 @@ static int f2fs_fill_super(struct super_block *sb, void *data, int silent)
+ 		}
+ 	} else {
+ 		err = f2fs_recover_fsync_data(sbi, true);
+-
+-		if (!f2fs_readonly(sb) && err > 0) {
+-			err = -EINVAL;
+-			f2fs_err(sbi, "Need to recover fsync data");
+-			goto free_meta;
++		if (err > 0) {
++			if (!f2fs_readonly(sb)) {
++				f2fs_err(sbi, "Need to recover fsync data");
++				err = -EINVAL;
++				goto free_meta;
++			} else {
++				f2fs_info(sbi, "drop all fsynced data");
++				err = 0;
++			}
+ 		}
+ 	}
+ 
+@@ -4709,13 +4720,12 @@ static int f2fs_fill_super(struct super_block *sb, void *data, int silent)
+ 	/* f2fs_recover_fsync_data() cleared this already */
+ 	clear_sbi_flag(sbi, SBI_POR_DOING);
+ 
+-	if (test_opt(sbi, DISABLE_CHECKPOINT)) {
++	if (test_opt(sbi, DISABLE_CHECKPOINT))
+ 		err = f2fs_disable_checkpoint(sbi);
+-		if (err)
+-			goto sync_free_meta;
+-	} else if (is_set_ckpt_flags(sbi, CP_DISABLED_FLAG)) {
+-		f2fs_enable_checkpoint(sbi);
+-	}
++	else if (is_set_ckpt_flags(sbi, CP_DISABLED_FLAG))
++		err = f2fs_enable_checkpoint(sbi);
++	if (err)
++		goto sync_free_meta;
+ 
+ 	/*
+ 	 * If filesystem is not mounted as read-only then
+@@ -4728,7 +4738,7 @@ static int f2fs_fill_super(struct super_block *sb, void *data, int silent)
+ 		if (err)
+ 			goto sync_free_meta;
+ 	}
+-	kvfree(options);
++	kfree(options);
+ 
+ 	/* recover broken superblock */
+ 	if (recovery) {
+@@ -4811,7 +4821,7 @@ static int f2fs_fill_super(struct super_block *sb, void *data, int silent)
+ 	f2fs_destroy_iostat(sbi);
+ free_bio_info:
+ 	for (i = 0; i < NR_PAGE_TYPE; i++)
+-		kvfree(sbi->write_io[i]);
++		kfree(sbi->write_io[i]);
+ 
+ #if IS_ENABLED(CONFIG_UNICODE)
+ 	utf8_unload(sb->s_encoding);
+@@ -4823,7 +4833,7 @@ static int f2fs_fill_super(struct super_block *sb, void *data, int silent)
+ 		kfree(F2FS_OPTION(sbi).s_qf_names[i]);
+ #endif
+ 	fscrypt_free_dummy_policy(&F2FS_OPTION(sbi).dummy_enc_policy);
+-	kvfree(options);
++	kfree(options);
+ free_sb_buf:
+ 	kfree(raw_super);
+ free_sbi:
+diff --git a/fs/f2fs/xattr.c b/fs/f2fs/xattr.c
+index 65437c18e01d..4ce1d9cf66eb 100644
+--- a/fs/f2fs/xattr.c
++++ b/fs/f2fs/xattr.c
+@@ -575,8 +575,7 @@ ssize_t f2fs_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size)
+ 	last_base_addr = (void *)base_addr + XATTR_SIZE(inode);
+ 
+ 	list_for_each_xattr(entry, base_addr) {
+-		const struct xattr_handler *handler =
+-			f2fs_xattr_handler(entry->e_name_index);
++		const struct xattr_handler *handler;
+ 		const char *prefix;
+ 		size_t prefix_len;
+ 		size_t size;
+@@ -588,9 +587,11 @@ ssize_t f2fs_listxattr(struct dentry *dentry, char *buffer, size_t buffer_size)
+ 			set_sbi_flag(F2FS_I_SB(inode), SBI_NEED_FSCK);
+ 			f2fs_handle_error(F2FS_I_SB(inode),
+ 						ERROR_CORRUPTED_XATTR);
+-			break;
++			error = -EFSCORRUPTED;
++			goto cleanup;
+ 		}
+ 
++		handler = f2fs_xattr_handler(entry->e_name_index);
+ 		if (!handler || (handler->list && !handler->list(dentry)))
+ 			continue;
+ 
+diff --git a/include/linux/blk_types.h b/include/linux/blk_types.h
+index c3e7a4aad872..9165ab5c0e45 100644
+--- a/include/linux/blk_types.h
++++ b/include/linux/blk_types.h
+@@ -518,15 +518,13 @@ static inline bool op_is_discard(blk_opf_t op)
+ }
+ 
+ /*
+- * Check if a bio or request operation is a zone management operation, with
+- * the exception of REQ_OP_ZONE_RESET_ALL which is treated as a special case
+- * due to its different handling in the block layer and device response in
+- * case of command failure.
++ * Check if a bio or request operation is a zone management operation.
+  */
+ static inline bool op_is_zone_mgmt(enum req_op op)
+ {
+ 	switch (op & REQ_OP_MASK) {
+ 	case REQ_OP_ZONE_RESET:
++	case REQ_OP_ZONE_RESET_ALL:
+ 	case REQ_OP_ZONE_OPEN:
+ 	case REQ_OP_ZONE_CLOSE:
+ 	case REQ_OP_ZONE_FINISH:
+diff --git a/include/linux/damon.h b/include/linux/damon.h
+index 54e02ca54936..69ddedbc5367 100644
+--- a/include/linux/damon.h
++++ b/include/linux/damon.h
+@@ -577,6 +577,7 @@ static inline unsigned int damon_max_nr_accesses(const struct damon_attrs *attrs
+ 
+ int damon_start(struct damon_ctx **ctxs, int nr_ctxs, bool exclusive);
+ int damon_stop(struct damon_ctx **ctxs, int nr_ctxs);
++int damon_kdamond_pid(struct damon_ctx *ctx);
+ 
+ int damon_set_region_biggest_system_ram_default(struct damon_target *t,
+ 				unsigned long *start, unsigned long *end);
+diff --git a/include/linux/f2fs_fs.h b/include/linux/f2fs_fs.h
+index 1cea5aeea773..8a0e898ad500 100644
+--- a/include/linux/f2fs_fs.h
++++ b/include/linux/f2fs_fs.h
+@@ -107,6 +107,9 @@ enum f2fs_error {
+ 	ERROR_INCONSISTENT_SIT,
+ 	ERROR_CORRUPTED_VERITY_XATTR,
+ 	ERROR_CORRUPTED_XATTR,
++	ERROR_INVALID_NODE_REFERENCE,
++	ERROR_INCONSISTENT_NAT,
++	ERROR_INCONSISTENT_ORPHAN,
+ 	ERROR_MAX,
+ };
+ 
+diff --git a/include/linux/hugetlb.h b/include/linux/hugetlb.h
+index 667f0db5e499..c35c7fd14f4a 100644
+--- a/include/linux/hugetlb.h
++++ b/include/linux/hugetlb.h
+@@ -182,7 +182,7 @@ bool hugetlb_reserve_pages(struct inode *inode, long from, long to,
+ 						vm_flags_t vm_flags);
+ long hugetlb_unreserve_pages(struct inode *inode, long start, long end,
+ 						long freed);
+-int isolate_hugetlb(struct page *page, struct list_head *list);
++int folio_isolate_hugetlb(struct page *page, struct list_head *list);
+ int get_hwpoison_huge_page(struct page *page, bool *hugetlb);
+ int get_huge_page_for_hwpoison(unsigned long pfn, int flags);
+ void putback_active_hugepage(struct page *page);
+@@ -233,7 +233,7 @@ void hugetlb_vma_lock_release(struct kref *kref);
+ 
+ int pmd_huge(pmd_t pmd);
+ int pud_huge(pud_t pud);
+-unsigned long hugetlb_change_protection(struct vm_area_struct *vma,
++long hugetlb_change_protection(struct vm_area_struct *vma,
+ 		unsigned long address, unsigned long end, pgprot_t newprot,
+ 		unsigned long cp_flags);
+ 
+@@ -422,7 +422,7 @@ static inline pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr,
+ 	return NULL;
+ }
+ 
+-static inline int isolate_hugetlb(struct page *page, struct list_head *list)
++static inline int folio_isolate_hugetlb(struct page *page, struct list_head *list)
+ {
+ 	return -EBUSY;
+ }
+@@ -446,7 +446,7 @@ static inline void move_hugetlb_state(struct page *oldpage,
+ {
+ }
+ 
+-static inline unsigned long hugetlb_change_protection(
++static inline long hugetlb_change_protection(
+ 			struct vm_area_struct *vma, unsigned long address,
+ 			unsigned long end, pgprot_t newprot,
+ 			unsigned long cp_flags)
+@@ -1193,7 +1193,7 @@ static inline __init void hugetlb_cma_reserve(int order)
+ #ifdef CONFIG_ARCH_WANT_HUGE_PMD_SHARE
+ static inline bool hugetlb_pmd_shared(pte_t *pte)
+ {
+-	return page_count(virt_to_page(pte)) > 1;
++	return atomic_read(&virt_to_page(pte)->pt_share_count);
+ }
+ #else
+ static inline bool hugetlb_pmd_shared(pte_t *pte)
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index 7beece723d41..c957614b45ab 100755
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -2343,7 +2343,7 @@ extern unsigned long move_page_tables(struct vm_area_struct *vma,
+ #define  MM_CP_UFFD_WP_ALL                 (MM_CP_UFFD_WP | \
+ 					    MM_CP_UFFD_WP_RESOLVE)
+ 
+-extern unsigned long change_protection(struct mmu_gather *tlb,
++extern long change_protection(struct mmu_gather *tlb,
+ 			      struct vm_area_struct *vma, unsigned long start,
+ 			      unsigned long end, pgprot_t newprot,
+ 			      unsigned long cp_flags);
+@@ -3511,13 +3511,12 @@ static inline bool debug_pagealloc_enabled_static(void)
+ 	return static_branch_unlikely(&_debug_pagealloc_enabled);
+ }
+ 
+-#ifdef CONFIG_DEBUG_PAGEALLOC
+ /*
+  * To support DEBUG_PAGEALLOC architecture must ensure that
+  * __kernel_map_pages() never fails
+  */
+ extern void __kernel_map_pages(struct page *page, int numpages, int enable);
+-
++#ifdef CONFIG_DEBUG_PAGEALLOC
+ static inline void debug_pagealloc_map_pages(struct page *page, int numpages)
+ {
+ 	if (debug_pagealloc_enabled_static())
+diff --git a/include/linux/sched/isolation.h b/include/linux/sched/isolation.h
+index 8c15abd67aed..fe1a46f30d24 100644
+--- a/include/linux/sched/isolation.h
++++ b/include/linux/sched/isolation.h
+@@ -46,6 +46,12 @@ static inline bool housekeeping_enabled(enum hk_type type)
+ 
+ static inline void housekeeping_affine(struct task_struct *t,
+ 				       enum hk_type type) { }
++
++static inline bool housekeeping_test_cpu(int cpu, enum hk_type type)
++{
++	return true;
++}
++
+ static inline void housekeeping_init(void) { }
+ #endif /* CONFIG_CPU_ISOLATION */
+ 
+@@ -58,4 +64,10 @@ static inline bool housekeeping_cpu(int cpu, enum hk_type type)
+ 	return true;
+ }
+ 
++static inline bool cpu_is_isolated(int cpu)
++{
++	return !housekeeping_test_cpu(cpu, HK_TYPE_DOMAIN) ||
++		 !housekeeping_test_cpu(cpu, HK_TYPE_TICK);
++}
++
+ #endif /* _LINUX_SCHED_ISOLATION_H */
+diff --git a/include/linux/swapops.h b/include/linux/swapops.h
+index 1f59f9edcc24..7de89a03b72e 100644
+--- a/include/linux/swapops.h
++++ b/include/linux/swapops.h
+@@ -541,11 +541,21 @@ static inline struct page *pfn_swap_entry_to_page(swp_entry_t entry)
+ {
+ 	struct page *p = pfn_to_page(swp_offset_pfn(entry));
+ 
+-	/*
+-	 * Any use of migration entries may only occur while the
+-	 * corresponding page is locked
+-	 */
+-	BUG_ON(is_migration_entry(entry) && !PageLocked(p));
++	if (is_migration_entry(entry)) {
++		/*
++		 * Ensure we do not race with split, which might alter tail
++		 * pages into new folios and thus result in observing an
++		 * unlocked folio.
++		 * This matches the write barrier in __split_folio_to_order().
++		 */
++		smp_rmb();
++
++		/*
++		 * Any use of migration entries may only occur while the
++		 * corresponding page is locked
++		 */
++		BUG_ON(!PageLocked(p));
++	}
+ 
+ 	return p;
+ }
+diff --git a/include/trace/events/kmem.h b/include/trace/events/kmem.h
+index ed3af0df3692..aabaaa9b2228 100644
+--- a/include/trace/events/kmem.h
++++ b/include/trace/events/kmem.h
+@@ -476,7 +476,13 @@ TRACE_EVENT(rss_stat,
+ 
+ 	TP_fast_assign(
+ 		__entry->mm_id = mm_ptr_to_hash(mm);
+-		__entry->curr = !!(current->mm == mm);
++		/*
++		 * curr is true if the mm matches the current task's mm_struct.
++		 * Since kthreads (PF_KTHREAD) have no mm_struct of their own
++		 * but can borrow one via kthread_use_mm(), we must filter them
++		 * out to avoid incorrectly attributing the RSS update to them.
++		 */
++		__entry->curr = current->mm == mm && !(current->flags & PF_KTHREAD);
+ 		__entry->member = member;
+ 		__entry->size = (count << PAGE_SHIFT);
+ 	),
+diff --git a/kernel/sched/cpudeadline.c b/kernel/sched/cpudeadline.c
+index 57c92d751bcd..afa84e1216ee 100644
+--- a/kernel/sched/cpudeadline.c
++++ b/kernel/sched/cpudeadline.c
+@@ -165,12 +165,13 @@ int cpudl_find(struct cpudl *cp, struct task_struct *p,
+  * cpudl_clear - remove a CPU from the cpudl max-heap
+  * @cp: the cpudl max-heap context
+  * @cpu: the target CPU
++ * @online: the online state of the deadline runqueue
+  *
+  * Notes: assumes cpu_rq(cpu)->lock is locked
+  *
+  * Returns: (void)
+  */
+-void cpudl_clear(struct cpudl *cp, int cpu)
++void cpudl_clear(struct cpudl *cp, int cpu, bool online)
+ {
+ 	int old_idx, new_cpu;
+ 	unsigned long flags;
+@@ -183,7 +184,7 @@ void cpudl_clear(struct cpudl *cp, int cpu)
+ 	if (old_idx == IDX_INVALID) {
+ 		/*
+ 		 * Nothing to remove if old_idx was invalid.
+-		 * This could happen if a rq_offline_dl is
++		 * This could happen if rq_online_dl or rq_offline_dl is
+ 		 * called for a CPU without -dl tasks running.
+ 		 */
+ 	} else {
+@@ -194,9 +195,12 @@ void cpudl_clear(struct cpudl *cp, int cpu)
+ 		cp->elements[new_cpu].idx = old_idx;
+ 		cp->elements[cpu].idx = IDX_INVALID;
+ 		cpudl_heapify(cp, old_idx);
+-
+-		cpumask_set_cpu(cpu, cp->free_cpus);
+ 	}
++	if (likely(online))
++		__cpumask_set_cpu(cpu, cp->free_cpus);
++	else
++		__cpumask_clear_cpu(cpu, cp->free_cpus);
++
+ 	raw_spin_unlock_irqrestore(&cp->lock, flags);
+ }
+ 
+@@ -227,7 +231,7 @@ void cpudl_set(struct cpudl *cp, int cpu, u64 dl)
+ 		cp->elements[new_idx].cpu = cpu;
+ 		cp->elements[cpu].idx = new_idx;
+ 		cpudl_heapify_up(cp, new_idx);
+-		cpumask_clear_cpu(cpu, cp->free_cpus);
++		__cpumask_clear_cpu(cpu, cp->free_cpus);
+ 	} else {
+ 		cp->elements[old_idx].dl = dl;
+ 		cpudl_heapify(cp, old_idx);
+@@ -236,26 +240,6 @@ void cpudl_set(struct cpudl *cp, int cpu, u64 dl)
+ 	raw_spin_unlock_irqrestore(&cp->lock, flags);
+ }
+ 
+-/*
+- * cpudl_set_freecpu - Set the cpudl.free_cpus
+- * @cp: the cpudl max-heap context
+- * @cpu: rd attached CPU
+- */
+-void cpudl_set_freecpu(struct cpudl *cp, int cpu)
+-{
+-	cpumask_set_cpu(cpu, cp->free_cpus);
+-}
+-
+-/*
+- * cpudl_clear_freecpu - Clear the cpudl.free_cpus
+- * @cp: the cpudl max-heap context
+- * @cpu: rd attached CPU
+- */
+-void cpudl_clear_freecpu(struct cpudl *cp, int cpu)
+-{
+-	cpumask_clear_cpu(cpu, cp->free_cpus);
+-}
+-
+ /*
+  * cpudl_init - initialize the cpudl structure
+  * @cp: the cpudl max-heap context
+diff --git a/kernel/sched/cpudeadline.h b/kernel/sched/cpudeadline.h
+index 0adeda93b5fb..ecff718d94ae 100644
+--- a/kernel/sched/cpudeadline.h
++++ b/kernel/sched/cpudeadline.h
+@@ -18,9 +18,7 @@ struct cpudl {
+ #ifdef CONFIG_SMP
+ int  cpudl_find(struct cpudl *cp, struct task_struct *p, struct cpumask *later_mask);
+ void cpudl_set(struct cpudl *cp, int cpu, u64 dl);
+-void cpudl_clear(struct cpudl *cp, int cpu);
++void cpudl_clear(struct cpudl *cp, int cpu, bool online);
+ int  cpudl_init(struct cpudl *cp);
+-void cpudl_set_freecpu(struct cpudl *cp, int cpu);
+-void cpudl_clear_freecpu(struct cpudl *cp, int cpu);
+ void cpudl_cleanup(struct cpudl *cp);
+ #endif /* CONFIG_SMP */
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 7f378fa0b6ed..9a96dc488431 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -1486,7 +1486,7 @@ static void dec_dl_deadline(struct dl_rq *dl_rq, u64 deadline)
+ 	if (!dl_rq->dl_nr_running) {
+ 		dl_rq->earliest_dl.curr = 0;
+ 		dl_rq->earliest_dl.next = 0;
+-		cpudl_clear(&rq->rd->cpudl, rq->cpu);
++		cpudl_clear(&rq->rd->cpudl, rq->cpu, rq->online);
+ 		cpupri_set(&rq->rd->cpupri, rq->cpu, rq->rt.highest_prio.curr);
+ 	} else {
+ 		struct rb_node *leftmost = rb_first_cached(&dl_rq->root);
+@@ -2529,9 +2529,10 @@ static void rq_online_dl(struct rq *rq)
+ 	if (rq->dl.overloaded)
+ 		dl_set_overload(rq);
+ 
+-	cpudl_set_freecpu(&rq->rd->cpudl, rq->cpu);
+ 	if (rq->dl.dl_nr_running > 0)
+ 		cpudl_set(&rq->rd->cpudl, rq->cpu, rq->dl.earliest_dl.curr);
++	else
++		cpudl_clear(&rq->rd->cpudl, rq->cpu, true);
+ }
+ 
+ /* Assumes rq->lock is held */
+@@ -2540,8 +2541,7 @@ static void rq_offline_dl(struct rq *rq)
+ 	if (rq->dl.overloaded)
+ 		dl_clear_overload(rq);
+ 
+-	cpudl_clear(&rq->rd->cpudl, rq->cpu);
+-	cpudl_clear_freecpu(&rq->rd->cpudl, rq->cpu);
++	cpudl_clear(&rq->rd->cpudl, rq->cpu, false);
+ }
+ 
+ void __init init_sched_dl_class(void)
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index bde37b92e151..ee841a3cce42 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -11080,22 +11080,25 @@ void update_max_interval(void)
+ 
+ static inline bool update_newidle_cost(struct sched_domain *sd, u64 cost)
+ {
++	unsigned long next_decay = sd->last_decay_max_lb_cost + HZ;
++	unsigned long now = jiffies;
++
+ 	if (cost > sd->max_newidle_lb_cost) {
+ 		/*
+ 		 * Track max cost of a domain to make sure to not delay the
+ 		 * next wakeup on the CPU.
+ 		 */
+ 		sd->max_newidle_lb_cost = cost;
+-		sd->last_decay_max_lb_cost = jiffies;
+-	} else if (time_after(jiffies, sd->last_decay_max_lb_cost + HZ)) {
++		sd->last_decay_max_lb_cost = now;
++
++	} else if (time_after(now, next_decay)) {
+ 		/*
+ 		 * Decay the newidle max times by ~1% per second to ensure that
+ 		 * it is not outdated and the current max cost is actually
+ 		 * shorter.
+ 		 */
+ 		sd->max_newidle_lb_cost = (sd->max_newidle_lb_cost * 253) / 256;
+-		sd->last_decay_max_lb_cost = jiffies;
+-
++		sd->last_decay_max_lb_cost = now;
+ 		return true;
+ 	}
+ 
+@@ -11750,14 +11753,15 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
+ 
+ 	rcu_read_lock();
+ 	sd = rcu_dereference_check_sched_domain(this_rq->sd);
++	if (!sd) {
++		rcu_read_unlock();
++		goto out;
++	}
+ 
+ 	if (!READ_ONCE(this_rq->rd->overload) ||
+-	    (sd && this_rq->avg_idle < sd->max_newidle_lb_cost)) {
+-
+-		if (sd)
+-			update_next_balance(sd, &next_balance);
++	    this_rq->avg_idle < sd->max_newidle_lb_cost) {
++		update_next_balance(sd, &next_balance);
+ 		rcu_read_unlock();
+-
+ 		goto out;
+ 	}
+ 	rcu_read_unlock();
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 116e8a70252e..58c22cac387f 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -2341,6 +2341,7 @@ static void push_rt_tasks(struct rq *rq)
+  */
+ static int rto_next_cpu(struct root_domain *rd)
+ {
++	int this_cpu = smp_processor_id();
+ 	int next;
+ 	int cpu;
+ 
+@@ -2367,6 +2368,10 @@ static int rto_next_cpu(struct root_domain *rd)
+ 
+ 		rd->rto_cpu = cpu;
+ 
++		/* Do not send IPI to self */
++		if (cpu == this_cpu)
++			continue;
++
+ 		if (cpu < nr_cpu_ids)
+ 			return cpu;
+ 
+diff --git a/mm/backing-dev.c b/mm/backing-dev.c
+index bf5525c2e561..593b829694a0 100644
+--- a/mm/backing-dev.c
++++ b/mm/backing-dev.c
+@@ -399,12 +399,13 @@ static void cgwb_release_workfn(struct work_struct *work)
+ 	wb_shutdown(wb);
+ 
+ 	css_put(wb->memcg_css);
+-	css_put(wb->blkcg_css);
+-	mutex_unlock(&wb->bdi->cgwb_release_mutex);
+ 
+ 	/* triggers blkg destruction if no online users left */
+ 	blkcg_unpin_online(wb->blkcg_css);
+ 
++	css_put(wb->blkcg_css);
++	mutex_unlock(&wb->bdi->cgwb_release_mutex);
++
+ 	fprop_local_destroy_percpu(&wb->memcg_completions);
+ 
+ 	spin_lock_irq(&cgwb_lock);
+diff --git a/mm/balloon_compaction.c b/mm/balloon_compaction.c
+index 22c96fed70b5..dafb7dc90cfd 100644
+--- a/mm/balloon_compaction.c
++++ b/mm/balloon_compaction.c
+@@ -93,12 +93,6 @@ size_t balloon_page_list_dequeue(struct balloon_dev_info *b_dev_info,
+ 		if (!trylock_page(page))
+ 			continue;
+ 
+-		if (IS_ENABLED(CONFIG_BALLOON_COMPACTION) &&
+-		    PageIsolated(page)) {
+-			/* raced with isolation */
+-			unlock_page(page);
+-			continue;
+-		}
+ 		balloon_page_delete(page);
+ 		__count_vm_event(BALLOON_DEFLATE);
+ 		list_add(&page->lru, pages);
+diff --git a/mm/damon/core-test.h b/mm/damon/core-test.h
+index 3db9b7368756..d8fef225930a 100644
+--- a/mm/damon/core-test.h
++++ b/mm/damon/core-test.h
+@@ -20,11 +20,17 @@ static void damon_test_regions(struct kunit *test)
+ 	struct damon_target *t;
+ 
+ 	r = damon_new_region(1, 2);
++	if (!r)
++		kunit_skip(test, "region alloc fail");
+ 	KUNIT_EXPECT_EQ(test, 1ul, r->ar.start);
+ 	KUNIT_EXPECT_EQ(test, 2ul, r->ar.end);
+ 	KUNIT_EXPECT_EQ(test, 0u, r->nr_accesses);
+ 
+ 	t = damon_new_target();
++	if (!t) {
++		damon_free_region(r);
++		kunit_skip(test, "target alloc fail");
++	}
+ 	KUNIT_EXPECT_EQ(test, 0u, damon_nr_regions(t));
+ 
+ 	damon_add_region(r, t);
+@@ -52,7 +58,14 @@ static void damon_test_target(struct kunit *test)
+ 	struct damon_ctx *c = damon_new_ctx();
+ 	struct damon_target *t;
+ 
++	if (!c)
++		kunit_skip(test, "ctx alloc fail");
++
+ 	t = damon_new_target();
++	if (!t) {
++		damon_destroy_ctx(c);
++		kunit_skip(test, "target alloc fail");
++	}
+ 	KUNIT_EXPECT_EQ(test, 0u, nr_damon_targets(c));
+ 
+ 	damon_add_target(c, t);
+@@ -84,8 +97,15 @@ static void damon_test_aggregate(struct kunit *test)
+ 	struct damon_region *r;
+ 	int it, ir;
+ 
++	if (!ctx)
++		kunit_skip(test, "ctx alloc fail");
++
+ 	for (it = 0; it < 3; it++) {
+ 		t = damon_new_target();
++		if (!t) {
++			damon_destroy_ctx(ctx);
++			kunit_skip(test, "target alloc fail");
++		}
+ 		damon_add_target(ctx, t);
+ 	}
+ 
+@@ -93,6 +113,10 @@ static void damon_test_aggregate(struct kunit *test)
+ 	damon_for_each_target(t, ctx) {
+ 		for (ir = 0; ir < 3; ir++) {
+ 			r = damon_new_region(saddr[it][ir], eaddr[it][ir]);
++			if (!r) {
++				damon_destroy_ctx(ctx);
++				kunit_skip(test, "region alloc fail");
++			}
+ 			r->nr_accesses = accesses[it][ir];
+ 			damon_add_region(r, t);
+ 		}
+@@ -123,8 +147,19 @@ static void damon_test_split_at(struct kunit *test)
+ 	struct damon_target *t;
+ 	struct damon_region *r;
+ 
++	if (!c)
++		kunit_skip(test, "ctx alloc fail");
+ 	t = damon_new_target();
++	if (!t) {
++		damon_destroy_ctx(c);
++		kunit_skip(test, "target alloc fail");
++	}
+ 	r = damon_new_region(0, 100);
++	if (!r) {
++		damon_destroy_ctx(c);
++		damon_free_target(t);
++		kunit_skip(test, "region alloc fail");
++	}
+ 	damon_add_region(r, t);
+ 	damon_split_region_at(t, r, 25);
+ 	KUNIT_EXPECT_EQ(test, r->ar.start, 0ul);
+@@ -145,10 +180,20 @@ static void damon_test_merge_two(struct kunit *test)
+ 	int i;
+ 
+ 	t = damon_new_target();
++	if (!t)
++		kunit_skip(test, "target alloc fail");
+ 	r = damon_new_region(0, 100);
++	if (!r) {
++		damon_free_target(t);
++		kunit_skip(test, "region alloc fail");
++	}
+ 	r->nr_accesses = 10;
+ 	damon_add_region(r, t);
+ 	r2 = damon_new_region(100, 300);
++	if (!r2) {
++		damon_free_target(t);
++		kunit_skip(test, "second region alloc fail");
++	}
+ 	r2->nr_accesses = 20;
+ 	damon_add_region(r2, t);
+ 
+@@ -193,8 +238,14 @@ static void damon_test_merge_regions_of(struct kunit *test)
+ 	int i;
+ 
+ 	t = damon_new_target();
++	if (!t)
++		kunit_skip(test, "target alloc fail");
+ 	for (i = 0; i < ARRAY_SIZE(sa); i++) {
+ 		r = damon_new_region(sa[i], ea[i]);
++		if (!r) {
++			damon_free_target(t);
++			kunit_skip(test, "region alloc fail");
++		}
+ 		r->nr_accesses = nrs[i];
+ 		damon_add_region(r, t);
+ 	}
+@@ -216,15 +267,35 @@ static void damon_test_split_regions_of(struct kunit *test)
+ 	struct damon_target *t;
+ 	struct damon_region *r;
+ 
++	if (!c)
++		kunit_skip(test, "ctx alloc fail");
+ 	t = damon_new_target();
++	if (!t) {
++		damon_destroy_ctx(c);
++		kunit_skip(test, "target alloc fail");
++	}
+ 	r = damon_new_region(0, 22);
++	if (!r) {
++		damon_destroy_ctx(c);
++		damon_free_target(t);
++		kunit_skip(test, "region alloc fail");
++	}
+ 	damon_add_region(r, t);
+ 	damon_split_regions_of(t, 2);
+ 	KUNIT_EXPECT_LE(test, damon_nr_regions(t), 2u);
+ 	damon_free_target(t);
+ 
+ 	t = damon_new_target();
++	if (!t) {
++		damon_destroy_ctx(c);
++		kunit_skip(test, "second target alloc fail");
++	}
+ 	r = damon_new_region(0, 220);
++	if (!r) {
++		damon_destroy_ctx(c);
++		damon_free_target(t);
++		kunit_skip(test, "second region alloc fail");
++	}
+ 	damon_add_region(r, t);
+ 	damon_split_regions_of(t, 4);
+ 	KUNIT_EXPECT_LE(test, damon_nr_regions(t), 4u);
+@@ -270,13 +341,26 @@ static void damon_test_ops_registration(struct kunit *test)
+ static void damon_test_set_regions(struct kunit *test)
+ {
+ 	struct damon_target *t = damon_new_target();
+-	struct damon_region *r1 = damon_new_region(4, 16);
+-	struct damon_region *r2 = damon_new_region(24, 32);
++	struct damon_region *r1, *r2;
+ 	struct damon_addr_range range = {.start = 8, .end = 28};
+ 	unsigned long expects[] = {8, 16, 16, 24, 24, 28};
+ 	int expect_idx = 0;
+ 	struct damon_region *r;
+ 
++	if (!t)
++		kunit_skip(test, "target alloc fail");
++	r1 = damon_new_region(4, 16);
++	if (!r1) {
++		damon_free_target(t);
++		kunit_skip(test, "region alloc fail");
++	}
++	r2 = damon_new_region(24, 32);
++	if (!r2) {
++		damon_free_target(t);
++		damon_free_region(r1);
++		kunit_skip(test, "second region alloc fail");
++	}
++
+ 	damon_add_region(r1, t);
+ 	damon_add_region(r2, t);
+ 	damon_set_regions(t, &range, 1);
+diff --git a/mm/damon/core.c b/mm/damon/core.c
+index b555452015f7..b7db9afe7114 100644
+--- a/mm/damon/core.c
++++ b/mm/damon/core.c
+@@ -643,6 +643,23 @@ static bool damon_check_reset_time_interval(struct timespec64 *baseline,
+ 	return true;
+ }
+ 
++/**
++ * damon_kdamond_pid() - Return pid of a given DAMON context's worker thread.
++ * @ctx:	The DAMON context of the question.
++ *
++ * Return: pid if @ctx is running, negative error code otherwise.
++ */
++int damon_kdamond_pid(struct damon_ctx *ctx)
++{
++	int pid = -EINVAL;
++
++	mutex_lock(&ctx->kdamond_lock);
++	if (ctx->kdamond)
++		pid = ctx->kdamond->pid;
++	mutex_unlock(&ctx->kdamond_lock);
++	return pid;
++}
++
+ /*
+  * Check whether it is time to flush the aggregated information
+  */
+@@ -851,6 +868,7 @@ static void damos_set_effective_quota(struct damos_quota *quota)
+ 	else
+ 		throughput = PAGE_SIZE * 1024;
+ 	esz = throughput * quota->ms;
++	esz = max(DAMON_MIN_REGION, esz);
+ 
+ 	if (quota->sz && quota->sz < esz)
+ 		esz = quota->sz;
+diff --git a/mm/damon/ops-common.c b/mm/damon/ops-common.c
+index 0ac833cd8176..026097443d8f 100644
+--- a/mm/damon/ops-common.c
++++ b/mm/damon/ops-common.c
+@@ -23,10 +23,10 @@ struct page *damon_get_page(unsigned long pfn)
+ {
+ 	struct page *page = pfn_to_online_page(pfn);
+ 
+-	if (!page || !PageLRU(page) || !get_page_unless_zero(page))
++	if (!page || !get_page_unless_zero(page))
+ 		return NULL;
+ 
+-	if (unlikely(!PageLRU(page))) {
++	if (!PageLRU(page)) {
+ 		put_page(page);
+ 		page = NULL;
+ 	}
+diff --git a/mm/damon/sysfs.c b/mm/damon/sysfs.c
+index 0a6b4625de9f..4f9a551ea948 100644
+--- a/mm/damon/sysfs.c
++++ b/mm/damon/sysfs.c
+@@ -716,7 +716,7 @@ static int damon_sysfs_context_add_dirs(struct damon_sysfs_context *context)
+ 
+ 	err = damon_sysfs_context_set_targets(context);
+ 	if (err)
+-		goto put_attrs_out;
++		goto rmdir_put_attrs_out;
+ 
+ 	err = damon_sysfs_context_set_schemes(context);
+ 	if (err)
+@@ -726,7 +726,8 @@ static int damon_sysfs_context_add_dirs(struct damon_sysfs_context *context)
+ put_targets_attrs_out:
+ 	kobject_put(&context->targets->kobj);
+ 	context->targets = NULL;
+-put_attrs_out:
++rmdir_put_attrs_out:
++	damon_sysfs_attrs_rm_dirs(context->attrs);
+ 	kobject_put(&context->attrs->kobj);
+ 	context->attrs = NULL;
+ 	return err;
+@@ -1515,6 +1516,9 @@ static int damon_sysfs_handle_cmd(enum damon_sysfs_cmd cmd,
+ {
+ 	bool need_wait = true;
+ 
++	if (cmd != DAMON_SYSFS_CMD_OFF && kdamond->contexts->nr != 1)
++		return -EINVAL;
++
+ 	/* Handle commands that doesn't access DAMON context-internal data */
+ 	switch (cmd) {
+ 	case DAMON_SYSFS_CMD_ON:
+diff --git a/mm/damon/vaddr-test.h b/mm/damon/vaddr-test.h
+index cfb3ba80a642..dda3c186ffef 100644
+--- a/mm/damon/vaddr-test.h
++++ b/mm/damon/vaddr-test.h
+@@ -128,8 +128,14 @@ static void damon_do_test_apply_three_regions(struct kunit *test,
+ 	int i;
+ 
+ 	t = damon_new_target();
++	if (!t)
++		kunit_skip(test, "target alloc fail");
+ 	for (i = 0; i < nr_regions / 2; i++) {
+ 		r = damon_new_region(regions[i * 2], regions[i * 2 + 1]);
++		if (!r) {
++			damon_destroy_target(t);
++			kunit_skip(test, "region alloc fail");
++		}
+ 		damon_add_region(r, t);
+ 	}
+ 
+@@ -242,7 +248,16 @@ static void damon_test_split_evenly_fail(struct kunit *test,
+ 		unsigned long start, unsigned long end, unsigned int nr_pieces)
+ {
+ 	struct damon_target *t = damon_new_target();
+-	struct damon_region *r = damon_new_region(start, end);
++	struct damon_region *r;
++
++	if (!t)
++		kunit_skip(test, "target alloc fail");
++
++	r = damon_new_region(start, end);
++	if (!r) {
++		damon_free_target(t);
++		kunit_skip(test, "region alloc fail");
++	}
+ 
+ 	damon_add_region(r, t);
+ 	KUNIT_EXPECT_EQ(test,
+@@ -261,10 +276,17 @@ static void damon_test_split_evenly_succ(struct kunit *test,
+ 	unsigned long start, unsigned long end, unsigned int nr_pieces)
+ {
+ 	struct damon_target *t = damon_new_target();
+-	struct damon_region *r = damon_new_region(start, end);
++	struct damon_region *r;
+ 	unsigned long expected_width = (end - start) / nr_pieces;
+ 	unsigned long i = 0;
+ 
++	if (!t)
++		kunit_skip(test, "target alloc fail");
++	r = damon_new_region(start, end);
++	if (!r) {
++		damon_free_target(t);
++		kunit_skip(test, "region alloc fail");
++	}
+ 	damon_add_region(r, t);
+ 	KUNIT_EXPECT_EQ(test,
+ 			damon_va_evenly_split_region(t, r, nr_pieces), 0);
+diff --git a/mm/gup.c b/mm/gup.c
+index 37c55e61460e..4ff3a03f379b 100644
+--- a/mm/gup.c
++++ b/mm/gup.c
+@@ -1984,7 +1984,7 @@ static void collect_longterm_unpinnable_pages(
+ 			continue;
+ 
+ 		if (folio_test_hugetlb(folio)) {
+-			isolate_hugetlb(&folio->page, movable_page_list);
++			folio_isolate_hugetlb(&folio->page, movable_page_list);
+ 			continue;
+ 		}
+ 
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index f4fc1643cafa..11df04a24ece 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -2256,7 +2256,9 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
+ 			if (!PageReferenced(page) && pmd_young(old_pmd))
+ 				SetPageReferenced(page);
+ 			page_remove_rmap(page, vma, true);
++			add_mm_counter(mm, mm_counter_file(page), -HPAGE_PMD_NR);
+ 			put_page(page);
++			return;
+ 		}
+ 		add_mm_counter(mm, mm_counter_file(page), -HPAGE_PMD_NR);
+ 		return;
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index 011effee5f62..9466ddd9c07c 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -2989,7 +2989,7 @@ static int alloc_and_dissolve_huge_page(struct hstate *h, struct page *old_page,
+ 		 * Fail with -EBUSY if not possible.
+ 		 */
+ 		spin_unlock_irq(&hugetlb_lock);
+-		ret = isolate_hugetlb(old_page, list);
++		ret = folio_isolate_hugetlb(old_page, list);
+ 		spin_lock_irq(&hugetlb_lock);
+ 		goto free_new;
+ 	} else if (!HPageFreed(old_page)) {
+@@ -3065,7 +3065,7 @@ int isolate_or_dissolve_huge_page(struct page *page, struct list_head *list)
+ 	if (hstate_is_gigantic(h))
+ 		return -ENOMEM;
+ 
+-	if (page_count(head) && !isolate_hugetlb(head, list))
++	if (page_count(head) && !folio_isolate_hugetlb(head, list))
+ 		ret = 0;
+ 	else if (!page_count(head))
+ 		ret = alloc_and_dissolve_huge_page(h, head, list);
+@@ -5059,18 +5059,13 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
+ 			break;
+ 		}
+ 
+-		/*
+-		 * If the pagetables are shared don't copy or take references.
+-		 *
+-		 * dst_pte == src_pte is the common case of src/dest sharing.
+-		 * However, src could have 'unshared' and dst shares with
+-		 * another vma. So page_count of ptep page is checked instead
+-		 * to reliably determine whether pte is shared.
+-		 */
+-		if (page_count(virt_to_page(dst_pte)) > 1) {
++#ifdef CONFIG_ARCH_WANT_HUGE_PMD_SHARE
++		/* If the pagetables are shared, there is nothing to do */
++		if (atomic_read(&virt_to_page(dst_pte)->pt_share_count)) {
+ 			addr |= last_addr_mask;
+ 			continue;
+ 		}
++#endif
+ 
+ 		dst_ptl = huge_pte_lock(h, dst, dst_pte);
+ 		src_ptl = huge_pte_lockptr(h, src, src_pte);
+@@ -6651,7 +6646,7 @@ long follow_hugetlb_page(struct mm_struct *mm, struct vm_area_struct *vma,
+ 	return i ? i : err;
+ }
+ 
+-unsigned long hugetlb_change_protection(struct vm_area_struct *vma,
++long hugetlb_change_protection(struct vm_area_struct *vma,
+ 		unsigned long address, unsigned long end,
+ 		pgprot_t newprot, unsigned long cp_flags)
+ {
+@@ -6660,7 +6655,7 @@ unsigned long hugetlb_change_protection(struct vm_area_struct *vma,
+ 	pte_t *ptep;
+ 	pte_t pte;
+ 	struct hstate *h = hstate_vma(vma);
+-	unsigned long pages = 0, psize = huge_page_size(h);
++	long pages = 0, psize = huge_page_size(h);
+ 	bool shared_pmd = false;
+ 	struct mmu_notifier_range range;
+ 	unsigned long last_addr_mask;
+@@ -7400,7 +7395,24 @@ follow_huge_pgd(struct mm_struct *mm, unsigned long address, pgd_t *pgd, int fla
+ 	return pte_page(*(pte_t *)pgd) + ((address & ~PGDIR_MASK) >> PAGE_SHIFT);
+ }
+ 
+-int isolate_hugetlb(struct page *page, struct list_head *list)
++/**
++ * folio_isolate_hugetlb - try to isolate an allocated hugetlb page
++ * @page: the page to isolate
++ * @list: the list to add the page to on success
++ *
++ * Isolate an allocated (refcount > 0) hugetlb page, marking it as
++ * isolated/non-migratable, and moving it from the active list to the
++ * given list.
++ *
++ * Isolation will fail if @page is not an allocated hugetlb page, or if
++ * it is already isolated/non-migratable.
++ *
++ * On success, an additional page reference is taken that must be dropped
++ * using putback_active_hugepage() to undo the isolation.
++ *
++ * Return: 0 if isolation worked, otherwise -EBUSY.
++ */
++int folio_isolate_hugetlb(struct page *page, struct list_head *list)
+ {
+ 	int ret = 0;
+ 
+@@ -7642,6 +7654,7 @@ void __init hugetlb_cma_reserve(int order)
+ 		 * let's allocate 1 GB on first three nodes and ignore the last one.
+ 		 */
+ 		per_node = DIV_ROUND_UP(hugetlb_cma_size, nr_online_nodes);
++		per_node = round_up(per_node, PAGE_SIZE << order);
+ 		pr_info("hugetlb_cma: reserve %lu MiB, up to %lu MiB per node\n",
+ 			hugetlb_cma_size / SZ_1M, per_node / SZ_1M);
+ 	}
+diff --git a/mm/kasan/init.c b/mm/kasan/init.c
+index cc64ed6858c6..796c339e512f 100644
+--- a/mm/kasan/init.c
++++ b/mm/kasan/init.c
+@@ -290,7 +290,7 @@ static void kasan_free_pte(pte_t *pte_start, pmd_t *pmd)
+ 			return;
+ 	}
+ 
+-	pte_free_kernel(&init_mm, (pte_t *)page_to_virt(pmd_page(*pmd)));
++	pte_free_kernel(&init_mm, pte_start);
+ 	pmd_clear(pmd);
+ }
+ 
+@@ -305,7 +305,7 @@ static void kasan_free_pmd(pmd_t *pmd_start, pud_t *pud)
+ 			return;
+ 	}
+ 
+-	pmd_free(&init_mm, (pmd_t *)page_to_virt(pud_page(*pud)));
++	pmd_free(&init_mm, pmd_start);
+ 	pud_clear(pud);
+ }
+ 
+@@ -320,7 +320,7 @@ static void kasan_free_pud(pud_t *pud_start, p4d_t *p4d)
+ 			return;
+ 	}
+ 
+-	pud_free(&init_mm, (pud_t *)page_to_virt(p4d_page(*p4d)));
++	pud_free(&init_mm, pud_start);
+ 	p4d_clear(p4d);
+ }
+ 
+@@ -335,7 +335,7 @@ static void kasan_free_p4d(p4d_t *p4d_start, pgd_t *pgd)
+ 			return;
+ 	}
+ 
+-	p4d_free(&init_mm, (p4d_t *)page_to_virt(pgd_page(*pgd)));
++	p4d_free(&init_mm, p4d_start);
+ 	pgd_clear(pgd);
+ }
+ 
+diff --git a/mm/kfence/core.c b/mm/kfence/core.c
+index 799d8503f35f..f1d5ea206d37 100644
+--- a/mm/kfence/core.c
++++ b/mm/kfence/core.c
+@@ -13,6 +13,7 @@
+ #include <linux/hash.h>
+ #include <linux/irq_work.h>
+ #include <linux/jhash.h>
++#include <linux/kasan-enabled.h>
+ #include <linux/kcsan-checks.h>
+ #include <linux/kfence.h>
+ #include <linux/kmemleak.h>
+@@ -542,7 +543,7 @@ static unsigned long kfence_init_pool(void)
+ {
+ 	unsigned long addr = (unsigned long)__kfence_pool;
+ 	struct page *pages;
+-	int i;
++	int i, rand;
+ 
+ 	if (!arch_kfence_init_pool())
+ 		return addr;
+@@ -590,19 +591,34 @@ static unsigned long kfence_init_pool(void)
+ 		INIT_LIST_HEAD(&meta->list);
+ 		raw_spin_lock_init(&meta->lock);
+ 		meta->state = KFENCE_OBJECT_UNUSED;
+-		meta->addr = addr; /* Initialize for validation in metadata_to_pageaddr(). */
+-		list_add_tail(&meta->list, &kfence_freelist);
++		/* Use addr to randomize the freelist. */
++		meta->addr = i;
+ 
+ 		/* Protect the right redzone. */
+-		if (unlikely(!kfence_protect(addr + PAGE_SIZE)))
++		if (unlikely(!kfence_protect(addr + 2 * i * PAGE_SIZE + PAGE_SIZE)))
+ 			goto reset_slab;
++	}
++
++	for (i = CONFIG_KFENCE_NUM_OBJECTS; i > 0; i--) {
++		rand = get_random_u32_below(i);
++		swap(kfence_metadata[i - 1].addr, kfence_metadata[rand].addr);
++	}
++
++	for (i = 0; i < CONFIG_KFENCE_NUM_OBJECTS; i++) {
++		struct kfence_metadata *meta_1 = &kfence_metadata[i];
++		struct kfence_metadata *meta_2 = &kfence_metadata[meta_1->addr];
+ 
++		list_add_tail(&meta_2->list, &kfence_freelist);
++	}
++	for (i = 0; i < CONFIG_KFENCE_NUM_OBJECTS; i++) {
++		kfence_metadata[i].addr = addr;
+ 		addr += 2 * PAGE_SIZE;
+ 	}
+ 
+ 	return 0;
+ 
+ reset_slab:
++	addr += 2 * i * PAGE_SIZE;
+ 	for (i = 0; i < KFENCE_POOL_SIZE / PAGE_SIZE; i++) {
+ 		struct slab *slab = page_slab(nth_page(pages, i));
+ 
+@@ -829,6 +845,20 @@ void __init kfence_alloc_pool(void)
+ 	if (!kfence_sample_interval)
+ 		return;
+ 
++	/*
++	 * If KASAN hardware tags are enabled, disable KFENCE, because it
++	 * does not support MTE yet.
++	 */
++	if (kasan_hw_tags_enabled()) {
++		pr_info("disabled as KASAN HW tags are enabled\n");
++		if (__kfence_pool) {
++			memblock_free(__kfence_pool, KFENCE_POOL_SIZE);
++			__kfence_pool = NULL;
++		}
++		kfence_sample_interval = 0;
++		return;
++	}
++
+ 	/* if the pool has already been initialized by arch, skip the below. */
+ 	if (__kfence_pool)
+ 		return;
+@@ -882,7 +912,8 @@ static int kfence_init_late(void)
+ #ifdef CONFIG_CONTIG_ALLOC
+ 	struct page *pages;
+ 
+-	pages = alloc_contig_pages(nr_pages, GFP_KERNEL, first_online_node, NULL);
++	pages = alloc_contig_pages(nr_pages, GFP_KERNEL | __GFP_SKIP_KASAN_UNPOISON |
++				   __GFP_SKIP_KASAN_POISON, first_online_node, NULL);
+ 	if (!pages)
+ 		return -ENOMEM;
+ 	__kfence_pool = page_to_virt(pages);
+@@ -891,7 +922,9 @@ static int kfence_init_late(void)
+ 		pr_warn("KFENCE_NUM_OBJECTS too large for buddy allocator\n");
+ 		return -EINVAL;
+ 	}
+-	__kfence_pool = alloc_pages_exact(KFENCE_POOL_SIZE, GFP_KERNEL);
++	__kfence_pool = alloc_pages_exact(KFENCE_POOL_SIZE, GFP_KERNEL |
++					  __GFP_SKIP_KASAN_UNPOISON |
++					  __GFP_SKIP_KASAN_POISON);
+ 	if (!__kfence_pool)
+ 		return -ENOMEM;
+ #endif
+diff --git a/mm/kmsan/shadow.c b/mm/kmsan/shadow.c
+index b8bb95eea5e3..f9e62f28d647 100644
+--- a/mm/kmsan/shadow.c
++++ b/mm/kmsan/shadow.c
+@@ -209,8 +209,7 @@ void kmsan_free_page(struct page *page, unsigned int order)
+ 	if (!kmsan_enabled || kmsan_in_runtime())
+ 		return;
+ 	kmsan_enter_runtime();
+-	kmsan_internal_poison_memory(page_address(page),
+-				     PAGE_SIZE << compound_order(page),
++	kmsan_internal_poison_memory(page_address(page), PAGE_SIZE << order,
+ 				     GFP_KERNEL,
+ 				     KMSAN_POISON_CHECK | KMSAN_POISON_FREE);
+ 	kmsan_leave_runtime();
+diff --git a/mm/memory-failure.c b/mm/memory-failure.c
+index 1a770a5243be..b38988ae0c07 100644
+--- a/mm/memory-failure.c
++++ b/mm/memory-failure.c
+@@ -1723,12 +1723,22 @@ static unsigned long __free_raw_hwp_pages(struct page *hpage, bool move_flag)
+ 	return count;
+ }
+ 
+-static int hugetlb_set_page_hwpoison(struct page *hpage, struct page *page)
++#define	MF_HUGETLB_FREED		0	/* freed hugepage */
++#define	MF_HUGETLB_IN_USED		1	/* in-use hugepage */
++#define	MF_HUGETLB_NON_HUGEPAGE		2	/* not a hugepage */
++#define	MF_HUGETLB_FOLIO_PRE_POISONED	3	/* folio already poisoned */
++#define	MF_HUGETLB_PAGE_PRE_POISONED	4	/* exact page already poisoned */
++#define	MF_HUGETLB_RETRY		5	/* hugepage is busy, retry */
++/*
++ * Set hugetlb page as hwpoisoned, update page private raw hwpoison list
++ * to keep track of the poisoned pages.
++ */
++static int hugetlb_update_hwpoison(struct page *hpage, struct page *page)
+ {
+ 	struct llist_head *head;
+ 	struct raw_hwp_page *raw_hwp;
+ 	struct llist_node *t, *tnode;
+-	int ret = TestSetPageHWPoison(hpage) ? -EHWPOISON : 0;
++	int ret = TestSetPageHWPoison(hpage) ? MF_HUGETLB_FOLIO_PRE_POISONED : 0;
+ 
+ 	/*
+ 	 * Once the hwpoison hugepage has lost reliable raw error info,
+@@ -1736,13 +1746,13 @@ static int hugetlb_set_page_hwpoison(struct page *hpage, struct page *page)
+ 	 * so skip to add additional raw error info.
+ 	 */
+ 	if (HPageRawHwpUnreliable(hpage))
+-		return -EHWPOISON;
++		return MF_HUGETLB_FOLIO_PRE_POISONED;
+ 	head = raw_hwp_list_head(hpage);
+ 	llist_for_each_safe(tnode, t, head->first) {
+ 		struct raw_hwp_page *p = container_of(tnode, struct raw_hwp_page, node);
+ 
+ 		if (p->page == page)
+-			return -EHWPOISON;
++			return MF_HUGETLB_PAGE_PRE_POISONED;
+ 	}
+ 
+ 	raw_hwp = kmalloc(sizeof(struct raw_hwp_page), GFP_ATOMIC);
+@@ -1797,41 +1807,38 @@ void hugetlb_clear_page_hwpoison(struct page *hpage)
+ 
+ /*
+  * Called from hugetlb code with hugetlb_lock held.
+- *
+- * Return values:
+- *   0             - free hugepage
+- *   1             - in-use hugepage
+- *   2             - not a hugepage
+- *   -EBUSY        - the hugepage is busy (try to retry)
+- *   -EHWPOISON    - the hugepage is already hwpoisoned
+  */
+ int __get_huge_page_for_hwpoison(unsigned long pfn, int flags)
+ {
+ 	struct page *page = pfn_to_page(pfn);
+ 	struct page *head = compound_head(page);
+-	int ret = 2;	/* fallback to normal page handling */
+ 	bool count_increased = false;
++	int ret, rc;
+ 
+-	if (!PageHeadHuge(head))
++	if (!PageHeadHuge(head)) {
++		ret = MF_HUGETLB_NON_HUGEPAGE;
+ 		goto out;
+-
+-	if (flags & MF_COUNT_INCREASED) {
+-		ret = 1;
++	} else if (flags & MF_COUNT_INCREASED) {
++		ret = MF_HUGETLB_IN_USED;
+ 		count_increased = true;
+ 	} else if (HPageFreed(head)) {
+-		ret = 0;
++		ret = MF_HUGETLB_FREED;
+ 	} else if (HPageMigratable(head)) {
+-		ret = get_page_unless_zero(head);
+-		if (ret)
++		if (get_page_unless_zero(head)) {
++			ret = MF_HUGETLB_IN_USED;
+ 			count_increased = true;
++		} else {
++			ret = MF_HUGETLB_FREED;
++		}
+ 	} else {
+-		ret = -EBUSY;
++		ret = MF_HUGETLB_RETRY;
+ 		if (!(flags & MF_NO_RETRY))
+ 			goto out;
+ 	}
+ 
+-	if (hugetlb_set_page_hwpoison(head, page)) {
+-		ret = -EHWPOISON;
++	rc = hugetlb_update_hwpoison(head, page);
++	if (rc >= MF_HUGETLB_FOLIO_PRE_POISONED) {
++		ret = rc;
+ 		goto out;
+ 	}
+ 
+@@ -1847,6 +1854,12 @@ int __get_huge_page_for_hwpoison(unsigned long pfn, int flags)
+  * with basic operations like hugepage allocation/free/demotion.
+  * So some of prechecks for hwpoison (pinning, and testing/setting
+  * PageHWPoison) should be done in single hugetlb_lock range.
++ * Returns:
++ *	0		- not hugetlb, or recovered
++ *	-EBUSY		- not recovered
++ *	-EOPNOTSUPP	- hwpoison_filter'ed
++ *	-EHWPOISON	- folio or exact page already poisoned
++ *	-EFAULT		- kill_accessing_process finds current->mm null
+  */
+ static int try_memory_failure_hugetlb(unsigned long pfn, int flags, int *hugetlb)
+ {
+@@ -1858,23 +1871,25 @@ static int try_memory_failure_hugetlb(unsigned long pfn, int flags, int *hugetlb
+ 	*hugetlb = 1;
+ retry:
+ 	res = get_huge_page_for_hwpoison(pfn, flags);
+-	if (res == 2) { /* fallback to normal page handling */
++	if (res == MF_HUGETLB_NON_HUGEPAGE) { /* fallback to normal page handling */
+ 		*hugetlb = 0;
+ 		return 0;
+-	} else if (res == -EHWPOISON) {
++	} else if (res == MF_HUGETLB_FOLIO_PRE_POISONED ||
++		   res == MF_HUGETLB_PAGE_PRE_POISONED) {
+ 		pr_err("%#lx: already hardware poisoned\n", pfn);
++		res = -EHWPOISON;
+ 		if (flags & MF_ACTION_REQUIRED) {
+ 			head = compound_head(p);
+ 			res = kill_accessing_process(current, page_to_pfn(head), flags);
+ 		}
+ 		return res;
+-	} else if (res == -EBUSY) {
++	} else if (res == MF_HUGETLB_RETRY) {
+ 		if (!(flags & MF_NO_RETRY)) {
+ 			flags |= MF_NO_RETRY;
+ 			goto retry;
+ 		}
+ 		action_result(pfn, MF_MSG_UNKNOWN, MF_IGNORED);
+-		return res;
++		return -EBUSY;
+ 	}
+ 
+ 	head = compound_head(p);
+@@ -1883,7 +1898,7 @@ static int try_memory_failure_hugetlb(unsigned long pfn, int flags, int *hugetlb
+ 	if (hwpoison_filter(p)) {
+ 		hugetlb_clear_page_hwpoison(head);
+ 		unlock_page(head);
+-		if (res == 1)
++		if (res == MF_HUGETLB_IN_USED)
+ 			put_page(head);
+ 		return -EOPNOTSUPP;
+ 	}
+@@ -1892,7 +1907,7 @@ static int try_memory_failure_hugetlb(unsigned long pfn, int flags, int *hugetlb
+ 	 * Handling free hugepage.  The possible race with hugepage allocation
+ 	 * or demotion can be prevented by PageHWPoison flag.
+ 	 */
+-	if (res == 0) {
++	if (res == MF_HUGETLB_FREED) {
+ 		unlock_page(head);
+ 		if (__page_handle_poison(p) > 0) {
+ 			page_ref_inc(p);
+@@ -2438,7 +2453,7 @@ static bool isolate_page(struct page *page, struct list_head *pagelist)
+ 	bool isolated = false;
+ 
+ 	if (PageHuge(page)) {
+-		isolated = !isolate_hugetlb(page, pagelist);
++		isolated = !folio_isolate_hugetlb(page, pagelist);
+ 	} else {
+ 		bool lru = !__PageMovable(page);
+ 
+diff --git a/mm/memory.c b/mm/memory.c
+index 58cc142aa7e8..00b36ada3081 100755
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -1663,7 +1663,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
+ 			 * consider uffd-wp bit when zap. For more information,
+ 			 * see zap_install_uffd_wp_if_needed().
+ 			 */
+-			WARN_ON_ONCE(!vma_is_anonymous(vma));
++			WARN_ON_ONCE(!PageAnon(page));
+ 			rss[mm_counter(page)]--;
+ 			if (is_device_private_entry(entry))
+ 				page_remove_rmap(page, vma, false);
+diff --git a/mm/memory_hotplug.c b/mm/memory_hotplug.c
+index c8cc2f63c3ea..33b21fc6d90d 100644
+--- a/mm/memory_hotplug.c
++++ b/mm/memory_hotplug.c
+@@ -1641,7 +1641,7 @@ do_migrate_range(unsigned long start_pfn, unsigned long end_pfn)
+ 
+ 		if (PageHuge(page)) {
+ 			pfn = page_to_pfn(head) + compound_nr(head) - 1;
+-			isolate_hugetlb(head, &source);
++			folio_isolate_hugetlb(head, &source);
+ 			continue;
+ 		} else if (PageTransHuge(page))
+ 			pfn = page_to_pfn(head) + thp_nr_pages(page) - 1;
+diff --git a/mm/mempolicy.c b/mm/mempolicy.c
+index 6e10edb75dab..9668fbc6a8c7 100644
+--- a/mm/mempolicy.c
++++ b/mm/mempolicy.c
+@@ -600,7 +600,7 @@ static int queue_pages_hugetlb(pte_t *pte, unsigned long hmask,
+ 	if (flags & (MPOL_MF_MOVE_ALL) ||
+ 	    (flags & MPOL_MF_MOVE && page_mapcount(page) == 1 &&
+ 	     !hugetlb_pmd_shared(pte))) {
+-		if (isolate_hugetlb(page, qp->pagelist) &&
++		if (folio_isolate_hugetlb(page, qp->pagelist) &&
+ 			(flags & MPOL_MF_STRICT))
+ 			/*
+ 			 * Failed to isolate page but allow migrating pages
+@@ -630,7 +630,7 @@ unsigned long change_prot_numa(struct vm_area_struct *vma,
+ 			unsigned long addr, unsigned long end)
+ {
+ 	struct mmu_gather tlb;
+-	int nr_updated;
++	long nr_updated;
+ 
+ 	tlb_gather_mmu(&tlb, vma->vm_mm);
+ 
+diff --git a/mm/migrate.c b/mm/migrate.c
+index 0ea94ce09c07..7f4a58055b0c 100644
+--- a/mm/migrate.c
++++ b/mm/migrate.c
+@@ -137,7 +137,7 @@ static void putback_movable_page(struct page *page)
+  *
+  * This function shall be used whenever the isolated pageset has been
+  * built from lru, balloon, hugetlbfs page. See isolate_migratepages_range()
+- * and isolate_hugetlb().
++ * and folio_isolate_hugetlb().
+  */
+ void putback_movable_pages(struct list_head *l)
+ {
+@@ -2012,7 +2012,7 @@ static int add_page_for_migration(struct mm_struct *mm, unsigned long addr,
+ 
+ 	if (PageHuge(page)) {
+ 		if (PageHead(page)) {
+-			err = isolate_hugetlb(page, pagelist);
++			err = folio_isolate_hugetlb(page, pagelist);
+ 			if (!err)
+ 				err = 1;
+ 		}
+diff --git a/mm/mprotect.c b/mm/mprotect.c
+index 477bf6870103..88637c5a6829 100644
+--- a/mm/mprotect.c
++++ b/mm/mprotect.c
+@@ -73,13 +73,13 @@ static inline bool can_change_pte_writable(struct vm_area_struct *vma,
+ 	return true;
+ }
+ 
+-static unsigned long change_pte_range(struct mmu_gather *tlb,
++static long change_pte_range(struct mmu_gather *tlb,
+ 		struct vm_area_struct *vma, pmd_t *pmd, unsigned long addr,
+ 		unsigned long end, pgprot_t newprot, unsigned long cp_flags)
+ {
+ 	pte_t *pte, oldpte;
+ 	spinlock_t *ptl;
+-	unsigned long pages = 0;
++	long pages = 0;
+ 	int target_node = NUMA_NO_NODE;
+ 	bool prot_numa = cp_flags & MM_CP_PROT_NUMA;
+ 	bool uffd_wp = cp_flags & MM_CP_UFFD_WP;
+@@ -377,13 +377,13 @@ uffd_wp_protect_file(struct vm_area_struct *vma, unsigned long cp_flags)
+ 		}							\
+ 	} while (0)
+ 
+-static inline unsigned long change_pmd_range(struct mmu_gather *tlb,
++static inline long change_pmd_range(struct mmu_gather *tlb,
+ 		struct vm_area_struct *vma, pud_t *pud, unsigned long addr,
+ 		unsigned long end, pgprot_t newprot, unsigned long cp_flags)
+ {
+ 	pmd_t *pmd;
+ 	unsigned long next;
+-	unsigned long pages = 0;
++	long pages = 0;
+ 	unsigned long nr_huge_updates = 0;
+ 	struct mmu_notifier_range range;
+ 
+@@ -391,7 +391,7 @@ static inline unsigned long change_pmd_range(struct mmu_gather *tlb,
+ 
+ 	pmd = pmd_offset(pud, addr);
+ 	do {
+-		unsigned long this_pages;
++		long this_pages;
+ 
+ 		next = pmd_addr_end(addr, end);
+ 
+@@ -461,13 +461,13 @@ static inline unsigned long change_pmd_range(struct mmu_gather *tlb,
+ 	return pages;
+ }
+ 
+-static inline unsigned long change_pud_range(struct mmu_gather *tlb,
++static inline long change_pud_range(struct mmu_gather *tlb,
+ 		struct vm_area_struct *vma, p4d_t *p4d, unsigned long addr,
+ 		unsigned long end, pgprot_t newprot, unsigned long cp_flags)
+ {
+ 	pud_t *pud;
+ 	unsigned long next;
+-	unsigned long pages = 0;
++	long pages = 0;
+ 
+ 	pud = pud_offset(p4d, addr);
+ 	do {
+@@ -482,13 +482,13 @@ static inline unsigned long change_pud_range(struct mmu_gather *tlb,
+ 	return pages;
+ }
+ 
+-static inline unsigned long change_p4d_range(struct mmu_gather *tlb,
++static inline long change_p4d_range(struct mmu_gather *tlb,
+ 		struct vm_area_struct *vma, pgd_t *pgd, unsigned long addr,
+ 		unsigned long end, pgprot_t newprot, unsigned long cp_flags)
+ {
+ 	p4d_t *p4d;
+ 	unsigned long next;
+-	unsigned long pages = 0;
++	long pages = 0;
+ 
+ 	p4d = p4d_offset(pgd, addr);
+ 	do {
+@@ -503,14 +503,14 @@ static inline unsigned long change_p4d_range(struct mmu_gather *tlb,
+ 	return pages;
+ }
+ 
+-static unsigned long change_protection_range(struct mmu_gather *tlb,
++static long change_protection_range(struct mmu_gather *tlb,
+ 		struct vm_area_struct *vma, unsigned long addr,
+ 		unsigned long end, pgprot_t newprot, unsigned long cp_flags)
+ {
+ 	struct mm_struct *mm = vma->vm_mm;
+ 	pgd_t *pgd;
+ 	unsigned long next;
+-	unsigned long pages = 0;
++	long pages = 0;
+ 
+ 	BUG_ON(addr >= end);
+ 	pgd = pgd_offset(mm, addr);
+@@ -529,12 +529,12 @@ static unsigned long change_protection_range(struct mmu_gather *tlb,
+ 	return pages;
+ }
+ 
+-unsigned long change_protection(struct mmu_gather *tlb,
++long change_protection(struct mmu_gather *tlb,
+ 		       struct vm_area_struct *vma, unsigned long start,
+ 		       unsigned long end, pgprot_t newprot,
+ 		       unsigned long cp_flags)
+ {
+-	unsigned long pages;
++	long pages;
+ 
+ 	BUG_ON((cp_flags & MM_CP_UFFD_WP_ALL) == MM_CP_UFFD_WP_ALL);
+ 
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 0afb807aece6..678e2ab5da7e 100755
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -204,6 +204,33 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
+ #define pcp_spin_unlock(ptr)						\
+ 	pcpu_spin_unlock(lock, ptr)
+ 
++/*
++ * With the UP spinlock implementation, when we spin_lock(&pcp->lock) (for i.e.
++ * a potentially remote cpu drain) and get interrupted by an operation that
++ * attempts pcp_spin_trylock(), we can't rely on the trylock failure due to UP
++ * spinlock assumptions making the trylock a no-op. So we have to turn that
++ * spin_lock() to a spin_lock_irqsave(). This works because on UP there are no
++ * remote cpu's so we can only be locking the only existing local one.
++ */
++#if defined(CONFIG_SMP) || defined(CONFIG_PREEMPT_RT)
++static inline void __flags_noop(unsigned long *flags) { }
++#define pcp_spin_lock_maybe_irqsave(ptr, flags)		\
++({							\
++	 __flags_noop(&(flags));			\
++	 spin_lock(&(ptr)->lock);			\
++})
++#define pcp_spin_unlock_maybe_irqrestore(ptr, flags)	\
++({							\
++	 spin_unlock(&(ptr)->lock);			\
++	 __flags_noop(&(flags));			\
++})
++#else
++#define pcp_spin_lock_maybe_irqsave(ptr, flags)		\
++		spin_lock_irqsave(&(ptr)->lock, flags)
++#define pcp_spin_unlock_maybe_irqrestore(ptr, flags)	\
++		spin_unlock_irqrestore(&(ptr)->lock, flags)
++#endif
++
+ #ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
+ DEFINE_PER_CPU(int, numa_node);
+ EXPORT_PER_CPU_SYMBOL(numa_node);
+@@ -3717,14 +3744,15 @@ static struct list_head *get_populated_pcp_list(struct zone *zone,
+  */
+ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
+ {
++	unsigned long UP_flags;
+ 	int to_drain, batch;
+ 
+ 	batch = READ_ONCE(pcp->batch);
+ 	to_drain = min(pcp->count, batch);
+ 	if (to_drain > 0) {
+-		spin_lock(&pcp->lock);
++		pcp_spin_lock_maybe_irqsave(pcp, UP_flags);
+ 		free_pcppages_bulk(zone, to_drain, pcp, 0);
+-		spin_unlock(&pcp->lock);
++		pcp_spin_unlock_maybe_irqrestore(pcp, UP_flags);
+ 	}
+ }
+ #endif
+@@ -3735,10 +3763,11 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
+ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
+ {
+ 	struct per_cpu_pages *pcp = per_cpu_ptr(zone->per_cpu_pageset, cpu);
++	unsigned long UP_flags;
+ 	int count;
+ 
+ 	do {
+-		spin_lock(&pcp->lock);
++		pcp_spin_lock_maybe_irqsave(pcp, UP_flags);
+ 		count = pcp->count;
+ 		if (count) {
+ 			int to_drain = min(count,
+@@ -3747,7 +3776,7 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
+ 			free_pcppages_bulk(zone, to_drain, pcp, 0);
+ 			count -= to_drain;
+ 		}
+-		spin_unlock(&pcp->lock);
++		pcp_spin_unlock_maybe_irqrestore(pcp, UP_flags);
+ 	} while (count);
+ }
+ 
+@@ -9833,11 +9862,19 @@ int percpu_pagelist_high_fraction_sysctl_handler(struct ctl_table *table,
+ 	int old_percpu_pagelist_high_fraction;
+ 	int ret;
+ 
++	/*
++	 * Avoid using pcp_batch_high_lock for reads as the value is read
++	 * atomically and a race with offlining is harmless.
++	 */
++
++	if (!write)
++		return proc_dointvec_minmax(table, write, buffer, length, ppos);
++
+ 	mutex_lock(&pcp_batch_high_lock);
+ 	old_percpu_pagelist_high_fraction = percpu_pagelist_high_fraction;
+ 
+ 	ret = proc_dointvec_minmax(table, write, buffer, length, ppos);
+-	if (!write || ret < 0)
++	if (ret < 0)
+ 		goto out;
+ 
+ 	/* Sanity checking to avoid pcp imbalance */
+@@ -9991,7 +10028,7 @@ void *__init alloc_large_system_hash(const char *tablename,
+ 		panic("Failed to allocate %s hash table\n", tablename);
+ 
+ 	pr_info("%s hash table entries: %ld (order: %d, %lu bytes, %s)\n",
+-		tablename, 1UL << log2qty, ilog2(size) - PAGE_SHIFT, size,
++		tablename, 1UL << log2qty, get_order(size), size,
+ 		virt ? (huge ? "vmalloc hugepage" : "vmalloc") : "linear");
+ 
+ 	if (_hash_shift)
+diff --git a/mm/rmap.c b/mm/rmap.c
+index 0dd0cd7d8907..6c6a0f23064c 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -1700,14 +1700,8 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+ 					mmu_notifier_invalidate_range(mm,
+ 						range.start, range.end);
+ 					/*
+-					 * The ref count of the PMD page was
+-					 * dropped which is part of the way map
+-					 * counting is done for shared PMDs.
+-					 * Return 'true' here.  When there is
+-					 * no other sharing, huge_pmd_unshare
+-					 * returns false and we will unmap the
+-					 * actual page and drop map count
+-					 * to zero.
++					 * The PMD table was unmapped,
++					 * consequently unmapping the folio.
+ 					 */
+ 					page_vma_mapped_walk_done(&pvmw);
+ 					break;
+@@ -2150,14 +2144,8 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
+ 						range.start, range.end);
+ 
+ 					/*
+-					 * The ref count of the PMD page was
+-					 * dropped which is part of the way map
+-					 * counting is done for shared PMDs.
+-					 * Return 'true' here.  When there is
+-					 * no other sharing, huge_pmd_unshare
+-					 * returns false and we will unmap the
+-					 * actual page and drop map count
+-					 * to zero.
++					 * The PMD table was unmapped,
++					 * consequently unmapping the folio.
+ 					 */
+ 					page_vma_mapped_walk_done(&pvmw);
+ 					break;
+diff --git a/mm/secretmem.c b/mm/secretmem.c
+index 0cc4cd41209e..624f4a5907f2 100644
+--- a/mm/secretmem.c
++++ b/mm/secretmem.c
+@@ -82,13 +82,13 @@ static vm_fault_t secretmem_fault(struct vm_fault *vmf)
+ 		__SetPageUptodate(page);
+ 		err = add_to_page_cache_lru(page, mapping, offset, gfp);
+ 		if (unlikely(err)) {
+-			put_page(page);
+ 			/*
+ 			 * If a split of large page was required, it
+ 			 * already happened when we marked the page invalid
+ 			 * which guarantees that this call won't fail
+ 			 */
+ 			set_direct_map_default_noflush(page);
++			put_page(page);
+ 			if (err == -EEXIST)
+ 				goto retry;
+ 
+diff --git a/mm/truncate.c b/mm/truncate.c
+index 07bbab34e04c..341ed09ad9e3 100644
+--- a/mm/truncate.c
++++ b/mm/truncate.c
+@@ -197,6 +197,31 @@ int truncate_inode_folio(struct address_space *mapping, struct folio *folio)
+ 	return 0;
+ }
+ 
++static int try_folio_split_or_unmap(struct folio *folio)
++{
++	enum ttu_flags ttu_flags =
++		TTU_SYNC |
++		TTU_SPLIT_HUGE_PMD |
++		TTU_IGNORE_MLOCK;
++	int ret;
++
++	ret = split_folio(folio);
++
++	/*
++	 * If the split fails, unmap the folio, so it will be refaulted
++	 * with PTEs to respect SIGBUS semantics.
++	 *
++	 * Make an exception for shmem/tmpfs that for long time
++	 * intentionally mapped with PMDs across i_size.
++	 */
++	if (ret && !shmem_mapping(folio->mapping)) {
++		try_to_unmap(folio, ttu_flags);
++		WARN_ON(folio_mapped(folio));
++	}
++
++	return ret;
++}
++
+ /*
+  * Handle partial folios.  The folio may be entirely within the
+  * range if a split has raced with us.  If not, we zero the part of the
+@@ -241,7 +266,7 @@ bool truncate_inode_partial_folio(struct folio *folio, loff_t start, loff_t end)
+ 		folio_invalidate(folio, offset, length);
+ 	if (!folio_test_large(folio))
+ 		return true;
+-	if (split_folio(folio) == 0)
++	if (try_folio_split_or_unmap(folio) == 0)
+ 		return true;
+ 	if (folio_test_dirty(folio))
+ 		return false;
+diff --git a/tools/testing/selftests/vm/hmm-tests.c b/tools/testing/selftests/vm/hmm-tests.c
+index 95af1a73f505..cf86094a3027 100644
+--- a/tools/testing/selftests/vm/hmm-tests.c
++++ b/tools/testing/selftests/vm/hmm-tests.c
+@@ -993,6 +993,56 @@ TEST_F(hmm, migrate)
+ 	hmm_buffer_free(buffer);
+ }
+ 
++/*
++ * Migrate private file memory to device private memory.
++ */
++TEST_F(hmm, migrate_file_private)
++{
++	struct hmm_buffer *buffer;
++	unsigned long npages;
++	unsigned long size;
++	unsigned long i;
++	int *ptr;
++	int ret;
++	int fd;
++
++	npages = ALIGN(HMM_BUFFER_SIZE, self->page_size) >> self->page_shift;
++	ASSERT_NE(npages, 0);
++	size = npages << self->page_shift;
++
++	fd = hmm_create_file(size);
++	ASSERT_GE(fd, 0);
++
++	buffer = malloc(sizeof(*buffer));
++	ASSERT_NE(buffer, NULL);
++
++	buffer->fd = fd;
++	buffer->size = size;
++	buffer->mirror = malloc(size);
++	ASSERT_NE(buffer->mirror, NULL);
++
++	buffer->ptr = mmap(NULL, size,
++			   PROT_READ | PROT_WRITE,
++			   MAP_PRIVATE,
++			   buffer->fd, 0);
++	ASSERT_NE(buffer->ptr, MAP_FAILED);
++
++	/* Initialize buffer in system memory. */
++	for (i = 0, ptr = buffer->ptr; i < size / sizeof(*ptr); ++i)
++		ptr[i] = i;
++
++	/* Migrate memory to device. */
++	ret = hmm_migrate_sys_to_dev(self->fd, buffer, npages);
++	ASSERT_EQ(ret, 0);
++	ASSERT_EQ(buffer->cpages, npages);
++
++	/* Check what the device read. */
++	for (i = 0, ptr = buffer->mirror; i < size / sizeof(*ptr); ++i)
++		ASSERT_EQ(ptr[i], i);
++
++	hmm_buffer_free(buffer);
++}
++
+ /*
+  * Migrate anonymous memory to device private memory and fault some of it back
+  * to system memory, then try migrating the resulting mix of system and device

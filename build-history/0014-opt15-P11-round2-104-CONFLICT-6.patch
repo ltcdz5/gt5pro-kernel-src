@@ -1,0 +1,319 @@
+From e55a82a0cee3c4ea7e90ed935d81d0bb60b196f7 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 16:26:25 +0800
+Subject: [PATCH 14/33] =?UTF-8?q?opt15-P11:=20=E4=BB=8E=20round2=20?=
+ =?UTF-8?q?=E9=81=97=E7=95=99=E7=9A=84=20104=20=E6=9D=A1=20CONFLICT=20?=
+ =?UTF-8?q?=E4=B8=AD=E6=8D=9E=E5=87=BA=206=20=E6=9D=A1=E8=87=AA=E6=B4=BD?=
+ =?UTF-8?q?=E5=AE=89=E5=85=A8=E4=BF=AE=E5=A4=8D?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+背景与方法论修正(本轮最重要的产出):
+  1) round2 的补丁应用顺序是「按 sha 排序」, 而上游补丁必须「按提交日期」打
+     => 这是大量 CONFLICT 的真正原因之一。以后收割必须按日期排序。
+  2) patch -F3 (fuzz) 在本树上不安全: 它会把 hunk 塞进文本相似但语义错误的位置。
+     实证: a89b76f4f76d 把 include/ufs/ufshcd.h 的新 quirk 插进注释块中间,
+     留下孤立 '*/' => 'expected identifier'。F3「成功」不等于正确。
+  3) 可靠的判据是「零容错 F0 + 补丁内容自检」:
+     F0 应用后, 逐条检查补丁的每条 + 行是否真出现在目标文件里; 不在则反向撤销。
+  4) 104 条 CONFLICT 里 74 条连 F0/F1/F2 都打不上(缺前置), 21~30 条能打但
+     多为补丁链中间环 —— 前置在 round2 那 28 条 CRC 退料里(ITAIL / ppath /
+     ext4_get_allocation_groups_count 的定义都在 fs/ext4/ext4.h, 提供者被退了)
+     => 批量自动化不可行, 这批本质是人工活。
+
+本提交落地的 6 条 (全部为纯 .c, 零 CRC 风险, 已过双闸门):
+  bdf2724eefd4 netfilter: ctnetlink: fix use-after-free in ctnetlink_dump_exp_ct()
+  5466e7d0cd9e crypto: authencesn: Do not place hiseq at end of dst for out-of-place decryption
+  28c7cfaf0c0a netfilter: xt_IDLETIMER: reject rev0 reuse of ALARM timer labels
+  97b89d7ccecc scsi: core: Fix error handling for scsi_alloc_sdev()
+  906c6cddca0c tcp: optimize inet_use_bhash2_on_bind()
+  80c178906d06 bpf: Make variables in bpf_prog_test_run_xdp less confusing
+
+验证:
+  make rc=0; 闸门1 导出集合 PASS(新增=22 消失=0 命中厂商 0/0)
+  闸门2 厂商 CRC 真值: 仅 bluetooth.ko(基线就不符)
+---
+ crypto/authencesn.c                  | 48 +++++++++++++++++-----------
+ drivers/scsi/scsi_scan.c             |  8 ++---
+ net/bpf/test_run.c                   | 26 +++++++--------
+ net/ipv4/inet_connection_sock.c      |  6 ++--
+ net/netfilter/nf_conntrack_netlink.c | 26 ++++++++++++++-
+ net/netfilter/xt_IDLETIMER.c         |  6 ++++
+ 6 files changed, 77 insertions(+), 43 deletions(-)
+
+diff --git a/crypto/authencesn.c b/crypto/authencesn.c
+index 67449fdd5dac..78de81b66806 100644
+--- a/crypto/authencesn.c
++++ b/crypto/authencesn.c
+@@ -214,6 +214,7 @@ static int crypto_authenc_esn_decrypt_tail(struct aead_request *req,
+ 			      crypto_ahash_alignmask(auth) + 1);
+ 	unsigned int cryptlen = req->cryptlen - authsize;
+ 	unsigned int assoclen = req->assoclen;
++	struct scatterlist *src = req->src;
+ 	struct scatterlist *dst = req->dst;
+ 	u8 *ihash = ohash + crypto_ahash_digestsize(auth);
+ 	u32 tmp[2];
+@@ -221,23 +222,27 @@ static int crypto_authenc_esn_decrypt_tail(struct aead_request *req,
+ 	if (!authsize)
+ 		goto decrypt;
+ 
+-	/* Move high-order bits of sequence number back. */
+-	scatterwalk_map_and_copy(tmp, dst, 4, 4, 0);
+-	scatterwalk_map_and_copy(tmp + 1, dst, assoclen + cryptlen, 4, 0);
+-	scatterwalk_map_and_copy(tmp, dst, 0, 8, 1);
++	if (src == dst) {
++		/* Move high-order bits of sequence number back. */
++		scatterwalk_map_and_copy(tmp, dst, 4, 4, 0);
++		scatterwalk_map_and_copy(tmp + 1, dst, assoclen + cryptlen, 4, 0);
++		scatterwalk_map_and_copy(tmp, dst, 0, 8, 1);
++	} else
++		memcpy_sglist(dst, src, assoclen);
+ 
+ 	if (crypto_memneq(ihash, ohash, authsize))
+ 		return -EBADMSG;
+ 
+ decrypt:
+ 
+-	sg_init_table(areq_ctx->dst, 2);
++	if (src != dst)
++		src = scatterwalk_ffwd(areq_ctx->src, src, assoclen);
+ 	dst = scatterwalk_ffwd(areq_ctx->dst, dst, assoclen);
+ 
+ 	skcipher_request_set_tfm(skreq, ctx->enc);
+ 	skcipher_request_set_callback(skreq, flags,
+ 				      req->base.complete, req->base.data);
+-	skcipher_request_set_crypt(skreq, dst, dst, cryptlen, req->iv);
++	skcipher_request_set_crypt(skreq, src, dst, cryptlen, req->iv);
+ 
+ 	return crypto_skcipher_decrypt(skreq);
+ }
+@@ -264,6 +269,7 @@ static int crypto_authenc_esn_decrypt(struct aead_request *req)
+ 	unsigned int assoclen = req->assoclen;
+ 	unsigned int cryptlen = req->cryptlen;
+ 	u8 *ihash = ohash + crypto_ahash_digestsize(auth);
++	struct scatterlist *src = req->src;
+ 	struct scatterlist *dst = req->dst;
+ 	u32 tmp[2];
+ 	int err;
+@@ -271,24 +277,28 @@ static int crypto_authenc_esn_decrypt(struct aead_request *req)
+ 	if (assoclen < 8)
+ 		return -EINVAL;
+ 
+-	cryptlen -= authsize;
+-
+-	if (req->src != dst)
+-		memcpy_sglist(dst, req->src, assoclen + cryptlen);
++	if (!authsize)
++		goto tail;
+ 
++	cryptlen -= authsize;
+ 	scatterwalk_map_and_copy(ihash, req->src, assoclen + cryptlen,
+ 				 authsize, 0);
+ 
+-	if (!authsize)
+-		goto tail;
+-
+ 	/* Move high-order bits of sequence number to the end. */
+-	scatterwalk_map_and_copy(tmp, dst, 0, 8, 0);
+-	scatterwalk_map_and_copy(tmp, dst, 4, 4, 1);
+-	scatterwalk_map_and_copy(tmp + 1, dst, assoclen + cryptlen, 4, 1);
+-
+-	sg_init_table(areq_ctx->dst, 2);
+-	dst = scatterwalk_ffwd(areq_ctx->dst, dst, 4);
++	scatterwalk_map_and_copy(tmp, src, 0, 8, 0);
++	if (src == dst) {
++		scatterwalk_map_and_copy(tmp, dst, 4, 4, 1);
++		scatterwalk_map_and_copy(tmp + 1, dst, assoclen + cryptlen, 4, 1);
++		dst = scatterwalk_ffwd(areq_ctx->dst, dst, 4);
++	} else {
++		scatterwalk_map_and_copy(tmp, dst, 0, 4, 1);
++		scatterwalk_map_and_copy(tmp + 1, dst, assoclen + cryptlen - 4, 4, 1);
++
++		src = scatterwalk_ffwd(areq_ctx->src, src, 8);
++		dst = scatterwalk_ffwd(areq_ctx->dst, dst, 4);
++		memcpy_sglist(dst, src, assoclen + cryptlen - 8);
++		dst = req->dst;
++	}
+ 
+ 	ahash_request_set_tfm(ahreq, auth);
+ 	ahash_request_set_crypt(ahreq, dst, ohash, assoclen + cryptlen);
+diff --git a/drivers/scsi/scsi_scan.c b/drivers/scsi/scsi_scan.c
+index c759c979113b..6f45874402e0 100644
+--- a/drivers/scsi/scsi_scan.c
++++ b/drivers/scsi/scsi_scan.c
+@@ -354,12 +354,8 @@ static struct scsi_device *scsi_alloc_sdev(struct scsi_target *starget,
+ 	 * default device queue depth to figure out sbitmap shift
+ 	 * since we use this queue depth most of times.
+ 	 */
+-	if (scsi_realloc_sdev_budget_map(sdev, depth)) {
+-		kref_put(&sdev->host->tagset_refcnt, scsi_mq_free_tags);
+-		put_device(&starget->dev);
+-		kfree(sdev);
+-		goto out;
+-	}
++	if (scsi_realloc_sdev_budget_map(sdev, depth))
++		goto out_device_destroy;
+ 
+ 	scsi_change_queue_depth(sdev, depth);
+ 
+diff --git a/net/bpf/test_run.c b/net/bpf/test_run.c
+index 26cee0151d4c..46d0e7b6740a 100644
+--- a/net/bpf/test_run.c
++++ b/net/bpf/test_run.c
+@@ -1286,9 +1286,9 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
+ {
+ 	bool do_live = (kattr->test.flags & BPF_F_TEST_XDP_LIVE_FRAMES);
+ 	u32 tailroom = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
++	u32 retval = 0, duration, max_linear_sz, size;
++	u32 linear_sz = kattr->test.data_size_in;
+ 	u32 batch_size = kattr->test.batch_size;
+-	u32 retval = 0, duration, max_data_sz;
+-	u32 size = kattr->test.data_size_in;
+ 	u32 headroom = XDP_PACKET_HEADROOM;
+ 	u32 repeat = kattr->test.repeat;
+ 	struct netdev_rx_queue *rxqueue;
+@@ -1322,7 +1322,7 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
+ 
+ 	if (ctx) {
+ 		/* There can't be user provided data before the meta data */
+-		if (ctx->data_meta || ctx->data_end != size ||
++		if (ctx->data_meta || ctx->data_end != kattr->test.data_size_in ||
+ 		    ctx->data > ctx->data_end ||
+ 		    unlikely(xdp_metalen_invalid(ctx->data)) ||
+ 		    (do_live && (kattr->test.data_out || kattr->test.ctx_out)))
+@@ -1331,30 +1331,30 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
+ 		headroom -= ctx->data;
+ 	}
+ 
+-	max_data_sz = PAGE_SIZE - headroom - tailroom;
+-	if (size > max_data_sz) {
+-		/* disallow live data mode for jumbo frames */
+-		if (do_live)
+-			goto free_ctx;
+-		size = max_data_sz;
+-	}
++	max_linear_sz = PAGE_SIZE - headroom - tailroom;
++	linear_sz = min_t(u32, linear_sz, max_linear_sz);
++
++	/* disallow live data mode for jumbo frames */
++	if (do_live && kattr->test.data_size_in > linear_sz)
++		goto free_ctx;
+ 
+-	data = bpf_test_init(kattr, size, max_data_sz, headroom, tailroom);
++	data = bpf_test_init(kattr, linear_sz, max_linear_sz, headroom, tailroom);
+ 	if (IS_ERR(data)) {
+ 		ret = PTR_ERR(data);
+ 		goto free_ctx;
+ 	}
+ 
+ 	rxqueue = __netif_get_rx_queue(current->nsproxy->net_ns->loopback_dev, 0);
+-	rxqueue->xdp_rxq.frag_size = headroom + max_data_sz + tailroom;
++	rxqueue->xdp_rxq.frag_size = PAGE_SIZE;
+ 	xdp_init_buff(&xdp, rxqueue->xdp_rxq.frag_size, &rxqueue->xdp_rxq);
+-	xdp_prepare_buff(&xdp, data, headroom, size, true);
++	xdp_prepare_buff(&xdp, data, headroom, linear_sz, true);
+ 	sinfo = xdp_get_shared_info_from_buff(&xdp);
+ 
+ 	ret = xdp_convert_md_to_buff(ctx, &xdp);
+ 	if (ret)
+ 		goto free_data;
+ 
++	size = linear_sz;
+ 	if (unlikely(kattr->test.data_size_in > size)) {
+ 		void __user *data_in = u64_to_user_ptr(kattr->test.data_in);
+ 
+diff --git a/net/ipv4/inet_connection_sock.c b/net/ipv4/inet_connection_sock.c
+index 4de6c6b3465b..014f5c9e4689 100644
+--- a/net/ipv4/inet_connection_sock.c
++++ b/net/ipv4/inet_connection_sock.c
+@@ -155,12 +155,10 @@ static bool inet_use_bhash2_on_bind(const struct sock *sk)
+ {
+ #if IS_ENABLED(CONFIG_IPV6)
+ 	if (sk->sk_family == AF_INET6) {
+-		int addr_type = ipv6_addr_type(&sk->sk_v6_rcv_saddr);
+-
+-		if (addr_type == IPV6_ADDR_ANY)
++		if (ipv6_addr_any(&sk->sk_v6_rcv_saddr))
+ 			return false;
+ 
+-		if (addr_type != IPV6_ADDR_MAPPED)
++		if (!ipv6_addr_v4mapped(&sk->sk_v6_rcv_saddr))
+ 			return true;
+ 	}
+ #endif
+diff --git a/net/netfilter/nf_conntrack_netlink.c b/net/netfilter/nf_conntrack_netlink.c
+index caf203b43b3e..48b93ed24bc0 100644
+--- a/net/netfilter/nf_conntrack_netlink.c
++++ b/net/netfilter/nf_conntrack_netlink.c
+@@ -3202,7 +3202,7 @@ ctnetlink_exp_ct_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ {
+ 	struct nfgenmsg *nfmsg = nlmsg_data(cb->nlh);
+ 	struct nf_conn *ct = cb->data;
+-	struct nf_conn_help *help = nfct_help(ct);
++	struct nf_conn_help *help;
+ 	u_int8_t l3proto = nfmsg->nfgen_family;
+ 	unsigned long last_id = cb->args[1];
+ 	struct nf_conntrack_expect *exp;
+@@ -3210,6 +3210,10 @@ ctnetlink_exp_ct_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ 	if (cb->args[0])
+ 		return 0;
+ 
++	help = nfct_help(ct);
++	if (!help)
++		return 0;
++
+ 	rcu_read_lock();
+ 
+ restart:
+@@ -3239,6 +3243,24 @@ ctnetlink_exp_ct_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ 	return skb->len;
+ }
+ 
++static int ctnetlink_dump_exp_ct_start(struct netlink_callback *cb)
++{
++	struct nf_conn *ct = cb->data;
++
++	if (!refcount_inc_not_zero(&ct->ct_general.use))
++		return -ENOENT;
++	return 0;
++}
++
++static int ctnetlink_dump_exp_ct_done(struct netlink_callback *cb)
++{
++	struct nf_conn *ct = cb->data;
++
++	if (ct)
++		nf_ct_put(ct);
++	return 0;
++}
++
+ static int ctnetlink_dump_exp_ct(struct net *net, struct sock *ctnl,
+ 				 struct sk_buff *skb,
+ 				 const struct nlmsghdr *nlh,
+@@ -3254,6 +3276,8 @@ static int ctnetlink_dump_exp_ct(struct net *net, struct sock *ctnl,
+ 	struct nf_conntrack_zone zone;
+ 	struct netlink_dump_control c = {
+ 		.dump = ctnetlink_exp_ct_dump_table,
++		.start = ctnetlink_dump_exp_ct_start,
++		.done = ctnetlink_dump_exp_ct_done,
+ 	};
+ 
+ 	err = ctnetlink_parse_tuple(cda, &tuple, CTA_EXPECT_MASTER,
+diff --git a/net/netfilter/xt_IDLETIMER.c b/net/netfilter/xt_IDLETIMER.c
+index 8718b2b1c9a6..04ebfcc20b16 100644
+--- a/net/netfilter/xt_IDLETIMER.c
++++ b/net/netfilter/xt_IDLETIMER.c
+@@ -571,6 +571,12 @@ static int idletimer_tg_checkentry(const struct xt_tgchk_param *par)
+ 
+ 	info->timer = __idletimer_tg_find_by_label(info->label);
+ 	if (info->timer) {
++		if (info->timer->timer_type & XT_IDLETIMER_ALARM) {
++			pr_debug("Adding/Replacing rule with same label and different timer type is not allowed\n");
++			mutex_unlock(&list_mutex);
++			return -EINVAL;
++		}
++
+ 		info->timer->refcnt++;
+ 		reset_timer(info->timer, info->timeout, NULL);
+ 		pr_debug("increased refcnt of timer %s to %u\n",

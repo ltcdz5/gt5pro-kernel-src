@@ -1,0 +1,107 @@
+From 48e095183986700c5c39e8608d9acc780683b9d2 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sat, 3 Oct 2026 04:06:25 +0800
+Subject: [PATCH 28/33] =?UTF-8?q?version1-opt37:=20=E5=9B=9B=E9=A1=B9=20co?=
+ =?UTF-8?q?nfig=20=E5=87=8F=E6=B3=95=EF=BC=88UBSAN=20/=20INIT=5FON=5FALLOC?=
+ =?UTF-8?q?=20/=20INIT=5FSTACK=20/=20ZRAM+RCU=5FNOCB=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+## 改了什么（全部是 config，零代码改动）
+| 项 | 从 | 到 | 性质 |
+|---|---|---|---|
+| CONFIG_UBSAN（连带 TRAP/BOUNDS/LOCAL_BOUNDS/SANITIZE_ALL） | y | n | 去掉调试探针（非漏洞缓解） |
+| CONFIG_INIT_ON_ALLOC_DEFAULT_ON | y | n | 去掉分配清零加固 |
+| CONFIG_INIT_STACK_ALL_ZERO → CONFIG_INIT_STACK_NONE | y | n→y | 去掉栈清零加固 |
+| CONFIG_ZRAM_MEMORY_TRACKING | y | n | **回到真原厂**（原厂就是 n，是我们多开的） |
+| CONFIG_RCU_NOCB_CPU_DEFAULT_ALL | y | n | **回到真原厂**（原厂 n；关掉省 8×3 个 rcuo/N kthread） |
+
+依据（子代理独立重查 + 我方复核）：
+- UBSAN 确实在跑 —— `out/mm/.page_alloc.o.cmd`、`kernel/sched/.core.o.cmd`、`fs/f2fs/.compress.o.cmd`、
+  `block/.blk-mq.o.cmd` 全含 `-fsanitize=array-bounds -fsanitize=local-bounds -fsanitize-undefined-trap-on-error`
+- INIT_STACK_ALL_ZERO 每个 .o 都有 `-ftrivial-auto-var-init=zero`（既有文档从未提过这项）
+- ZRAM_MEMORY_TRACKING / RCU_NOCB_CPU_DEFAULT_ALL 在真原厂（refs/stock_config.gz）是 n —— 是我们多开的
+- 效应量诚实估计：合计 2~8%（内核码密集路径），**对开机墙钟 0**；本机尺子测不出（≤2% 落在噪声带）
+- ⚠️ 其中 UBSAN/INIT_ON_ALLOC/INIT_STACK 三项是「用缓解网换性能」，回退各只需改一行 config
+
+## ★★ 本次踩的大坑（必须记住，差点刷砖）
+我校验配置时跑了 `make olddefconfig O=out` **且没带工具链变量** → kconfig 的工具链探测全失败
+→ 静默丢掉了**一大批**选项，其中致命的是：
+
+  CONFIG_COMPAT=n           ← task_struct/mm_struct 等核心结构体尺寸全变 ⇒ ABI 全塌
+  CONFIG_LTO_NONE=y         ← ThinLTO 丢
+  CONFIG_CFI_CLANG=n        ← 控制流完整性丢
+  CONFIG_SHADOW_CALL_STACK=n← 影子调用栈丢
+  CONFIG_KASAN_GENERIC=y    ← KASAN 模式从 HW_TAGS 掉回 GENERIC（Kconfig choice 默认值）
+  CONFIG_ARM64_SW_TTBR0_PAN=n
+
+连锁反应：`HAS_LTO_CLANG` 依赖 `!KASAN || KASAN_HW_TAGS` ⇒ KASAN 一变成 GENERIC，LTO 也不成立。
+
+**双闸门当场拦下**：
+  闸门1 消失=197 个导出、命中厂商 30 个 → FAIL 判砖
+  闸门2 会拒绝装载的模块 = **493（全部）**
+⇒ **这是闸门第 5 次真救场，拦的是"刷了必砖"的那一类。**
+
+**正确做法（已改回并写进纪律）**：
+1. ⛔ **绝不在本树跑 `olddefconfig`**（它做依赖重解析，而工具链探测在本环境不成立）
+2. ✅ 走项目原本的可复现路径：**`make gki_defconfig O=out`**（字面写入，不重解析）
+   —— `gki_defconfig` 就是真值源（P5 那次"把 config 增量录进 gki_defconfig 使构建可复现"的设计意图）
+3. ✅ `make Image` 的 `syncconfig` **不会**重解析，安全
+4. ✅ 任何 config 改动**同时写 `out/.config` + `arch/arm64/configs/gki_defconfig`**
+
+## 验证
+  make rc=0 错误=0
+  闸门1  新增=50 消失=1 | 命中厂商 新增=0 消失=0   PASS（与 P36 完全一致）
+  闸门2  会拒绝装载的模块 = 1（system_dlkm/bluetooth.ko, sk_filter_trim_cap，与 P36 完全一致）
+  版本串 6.1.141-android14-11-o-ltcdz5-version1-opt37
+  横幅   #62-ack304-version1-opt37
+  Image  38,095,360 B（P36 = 38,357,504 ⇒ 小了 256 KB，UBSAN 插桩确实去掉）
+  Image 里 UBSAN 痕迹 = 0；CFI 痕迹 = 3；auto.conf 里 LTO/CFI/SCS/KASAN_HW_TAGS 全在
+---
+ arch/arm64/configs/gki_defconfig | 11 ++++++++---
+ scripts/setlocalversion          |  2 +-
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 90eb20cf5e0e..acd1a67c2723 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -831,18 +831,23 @@ CONFIG_EROFS_FS_ZIP_LZMA=y
+ CONFIG_HZ=300
+ CONFIG_HZ_300=y
+ CONFIG_KFENCE_SAMPLE_INTERVAL=0
+-CONFIG_LTO=y
+ CONFIG_LTO_CLANG=y
+ CONFIG_LTO_CLANG_THIN=y
+ CONFIG_NET_SCH_ETS=y
+ CONFIG_NET_SCH_PIE=y
+ CONFIG_RCU_NOCB_CPU_CB_BOOST=y
+-CONFIG_RCU_NOCB_CPU_DEFAULT_ALL=y
++# CONFIG_RCU_NOCB_CPU_DEFAULT_ALL is not set
+ CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+ CONFIG_SECURITY_LANDLOCK=y
+ CONFIG_SECURITY_PATH=y
+ CONFIG_SLAB_MERGE_DEFAULT=y
+ CONFIG_XZ_DEC_MICROLZMA=y
+-CONFIG_ZRAM_MEMORY_TRACKING=y
++# CONFIG_ZRAM_MEMORY_TRACKING is not set
+ CONFIG_MQ_IOSCHED_SSG=y
+ CONFIG_MQ_IOSCHED_SSG_CGROUP=y
++
++# CONFIG_UBSAN is not set
++# CONFIG_INIT_ON_ALLOC_DEFAULT_ON is not set
++# CONFIG_INIT_STACK_ALL_ZERO is not set
++CONFIG_INIT_STACK_NONE=y
++# CONFIG_LTO_NONE is not set
+\ No newline at end of file
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 7e5c4d789284..89cda664add7 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-version1-opt36"
++echo "-android14-11-o-ltcdz5-version1-opt37"

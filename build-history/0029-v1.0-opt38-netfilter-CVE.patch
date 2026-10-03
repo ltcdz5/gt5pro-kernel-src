@@ -1,0 +1,198 @@
+From 5a22d459255f41f2599206362d0b80cf728a604e Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sat, 3 Oct 2026 17:00:11 +0800
+Subject: [PATCH 29/33] =?UTF-8?q?v1.0-opt38:=20netfilter=20=E5=9B=9B?=
+ =?UTF-8?q?=E9=A1=B9=E4=BF=AE=E5=A4=8D=EF=BC=88=E4=B8=89=E4=B8=AA=E5=B7=B2?=
+ =?UTF-8?q?=E5=85=AC=E5=BC=80=20CVE=20=E7=9A=84=E4=BF=AE=E5=A4=8D=E6=9C=AA?=
+ =?UTF-8?q?=E8=BF=9B=E6=A0=91=EF=BC=89+=20=E7=89=88=E6=9C=AC=E5=8F=B7?=
+ =?UTF-8?q?=E6=8D=A2=E6=96=B0=E8=A7=84=E8=8C=83?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+## 版本号
+本版是**新规范** `v<族>.<次>-opt<构建序>` 的首次上机：
+  6.1.141-android14-11-o-ltcdz5-v1.0-opt38 / #64-ack304-v1.0-opt38
+规则：opt35~39=v1.0，opt40~49=v1.1，此后每满 10 个构建升一档；构建序连续不跳号。
+
+## 来源与复核
+范围 = `net/netfilter`（117 个 .o 已编入；上一轮完全没碰过；本机 iptables/ipset/conntrack 真在跑）。
+子代理给出线索，**我方逐条核验源码事实**后施工。
+
+## 【1】ipset dump 路径 UAF（CVE-2026-64189）
+`net/netfilter/ipset/ip_set_core.c` 两处：`ip_set_dump_done()` 与 `ip_set_dump_do()` 的
+`release_refcount:` 段。
+- 宏 `ip_set_ref_netlink()`（:63-64）= `rcu_dereference_raw((inst)->ip_set_list)[id]`
+  ⇒ **裸读数组，且不取引用**
+- 释放点：`:1152 kvfree(tmp)`（在 `synchronize_net()` **之后**）、
+  `:2405 kvfree(rcu_dereference_protected(inst->ip_set_list, 1))`
+- `synchronize_net()` 只等 RCU 宽限期；而这两处读**不在 RCU 读侧临界区**里 ⇒ 等不到
+  ⇒ dump（`IPSET_CMD_LIST/SAVE`，系统进程可发）与并发 `ipset create` 扩容之间 **UAF**
+- 内证：同一文件里已有 7 处 `rcu_read_lock()` 范式（如 `:832`），这两处漏了
+修法：两处各包 `rcu_read_lock()/rcu_read_unlock()`。
+
+## 【2】tcp_sack 非对齐 32-bit 读（CVE-2026-97417）
+`net/netfilter/nf_conntrack_proto_tcp.c:409` 的 fast path 直接 `*(__be32 *)ptr` 解引用
+（`ptr` 来自 `skb_header_pointer`，未保证 4 字节对齐）。
+**内证**：同一函数 `:442` 用的是 `get_unaligned_be32()` ⇒ 只有 fast path 漏了。
+触发面：任何协商了 SACK 的 TCP 连接，对端发 `NOP,NOP,TIMESTAMP(8)` 12 字节 option 即命中。
+修法：一行，改 `get_unaligned_be32((__be32 *)ptr)`。
+（诚实说明：arm64 上非对齐 LDR 一般不 fault，且 opt37 已关 UBSAN ⇒ **实际危害低**；
+ 价值在于确定性 + 零风险。）
+
+## 【3】exp_seq_show 对已释放 master 的 NULL 解引用（CVE-2026-31414 的 .c 半边）
+`net/netfilter/nf_conntrack_expect.c:661`：
+`helper = rcu_dereference(nfct_help(expect->master)->helper);` —— `nfct_help()` 可能返回 NULL。
+- master 是 `SLAB_TYPESAFE_BY_RCU` 且立即 `kmem_cache_free`，被复用后 `ct->ext` 归零
+  ⇒ `NULL->helper` 低地址解引用 ⇒ oops/重启
+- `/proc/net/nf_conntrack_expect` 权限 0440，系统进程可读
+- **铁证**：`nf_conntrack_netlink.c:3050` 的 `ctnetlink_exp_dump_expect()` 对同一模式**判了**
+  `help = nfct_help(master); if (help) {...}` ⇒ 同一模式两处不一致
+修法：优先用 `expect->helper`（`struct nf_conntrack_expect` 确实有该字段，
+`include/net/netfilter/nf_conntrack_expect.h:17`），否则判 `nfct_help()` 是否为空。
+⛔ 结构体化那半边（给 `struct nf_conntrack_expect` 加 `possible_net_t net`）**没做** ——
+  该头虽是子系统私有，但 `nf_ct_expect_alloc/init/put/related_report` 都是 `EXPORT_SYMBOL_GPL`，
+  **必须先过闸门2**，留后续单独一版。
+
+## 【4】ipset 空桶永不释放（低危，非内存破坏）
+`net/netfilter/ipset/ip_set_hash_gen.h:1089`：`if (n->pos == 0 && k == 0)`
+- 上文 `for (i = 0, k = 0; i < n->pos; i++)` ⇒ `k` = `[0, n->pos)` 里未用位数
+- 正确条件是 `k == n->pos`（全未用 ⇒ 桶为空 ⇒ 该释放）
+- 现值等于**只在 `n->pos == 0` 时释放** ⇒ 空桶永不释放 ⇒ 泄漏 + `ext_size` 记账漂移
+修法：一行，改 `if (k == n->pos)`。
+
+## 明确排除（都"看着像但本机走不到"，记下来省得重查）
+- `CONFIG_NF_TABLES=n` ⇒ 全部 `nft_*` 排除；`NF_CONNTRACK_SIP=n`、`NF_CONNTRACK_TIMEOUT=n`、
+  **`BRIDGE_NETFILTER=n`**、`LOCKDEP` 未设
+- CVE-2026-52912（nf_queue bridge）→ 依赖 `BRIDGE_NETFILTER`，被编译掉
+- CVE-2026-53349（H323 expectfn）→ H323 全 built-in，`*_fini()` 永不执行
+- CVE-2026-64414（unreadable frags）→ 需 devmem TCP，本树 6.1 连 `skb_frags_readable()` 都没有
+- CVE-2026-97609 / CVE-2026-90237 → 对应 config 未设
+- CVE-2026-74624 → TCP 侧已合规（`nf_conntrack_proto_tcp.c:1115/1138/1156/1201`
+  全是先 `spin_unlock_bh(&ct->lock)` 再 log）；`nf_conntrack_proto.c:82` 的
+  `lockdep_assert_not_held` 是文档断言且 `LOCKDEP` 未设 = 空操作
+- 已修：CVE-2026-52921 / 53131 / 53268 / 31407 / 31496
+- `net/sched`：收割清单里本机没编的占绝大多数；`act_api` 的 `kfree_rcu` 修复上游被 Revert
+  （`6a3a59a`）⇒ 现 `kfree(p)` 是上游接受状态，不算缺陷
+
+## 验证
+  make rc=0 错误=0
+  闸门1  新增=50 消失=1 | 命中厂商 新增=0 消失=0   PASS
+  闸门2  会拒绝装载的模块 = 1（system_dlkm/bluetooth.ko, sk_filter_trim_cap）
+  版本串 6.1.141-android14-11-o-ltcdz5-v1.0-opt38
+  横幅   #64-ack304-v1.0-opt38
+  Image  38,095,360 B（与 opt37 同大小 —— 改动只有 30 行）
+  auto.conf 复核：COMPAT/LTO_CLANG_THIN/CFI_CLANG/SHADOW_CALL_STACK/KASAN_HW_TAGS/
+                  NF_CONNTRACK/IP_SET/HZ=300 全在
+---
+ net/netfilter/ipset/ip_set_core.c      | 15 ++++++++++++++-
+ net/netfilter/ipset/ip_set_hash_gen.h  |  2 +-
+ net/netfilter/nf_conntrack_expect.c    | 14 +++++++++++++-
+ net/netfilter/nf_conntrack_proto_tcp.c |  2 +-
+ scripts/setlocalversion                |  2 +-
+ 5 files changed, 30 insertions(+), 5 deletions(-)
+
+diff --git a/net/netfilter/ipset/ip_set_core.c b/net/netfilter/ipset/ip_set_core.c
+index 56215fb63b64..ff886a1674ab 100644
+--- a/net/netfilter/ipset/ip_set_core.c
++++ b/net/netfilter/ipset/ip_set_core.c
+@@ -1482,12 +1482,20 @@ ip_set_dump_done(struct netlink_callback *cb)
+ 		struct ip_set_net *inst =
+ 			(struct ip_set_net *)cb->args[IPSET_CB_NET];
+ 		ip_set_id_t index = (ip_set_id_t)cb->args[IPSET_CB_INDEX];
+-		struct ip_set *set = ip_set_ref_netlink(inst, index);
++		struct ip_set *set;
+ 
++		/* ip_set_ref_netlink() dereferences inst->ip_set_list without
++		 * taking a reference: the array can be replaced and kvfree()d
++		 * by ip_set_net_resize() right after synchronize_net(), which
++		 * does not wait for readers that are not in an RCU section.
++		 */
++		rcu_read_lock();
++		set = ip_set_ref_netlink(inst, index);
+ 		if (set->variant->uref)
+ 			set->variant->uref(set, cb, false);
+ 		pr_debug("release set %s\n", set->name);
+ 		__ip_set_put_netlink(set);
++		rcu_read_unlock();
+ 	}
+ 	return 0;
+ }
+@@ -1687,11 +1695,16 @@ ip_set_dump_do(struct sk_buff *skb, struct netlink_callback *cb)
+ release_refcount:
+ 	/* If there was an error or set is done, release set */
+ 	if (ret || !cb->args[IPSET_CB_ARG0]) {
++		/* Same as in ip_set_dump_done(): keep the RCU section open
++		 * while touching the (possibly replaced) ip_set_list array.
++		 */
++		rcu_read_lock();
+ 		set = ip_set_ref_netlink(inst, index);
+ 		if (set->variant->uref)
+ 			set->variant->uref(set, cb, false);
+ 		pr_debug("release set %s\n", set->name);
+ 		__ip_set_put_netlink(set);
++		rcu_read_unlock();
+ 		cb->args[IPSET_CB_ARG0] = 0;
+ 	}
+ out:
+diff --git a/net/netfilter/ipset/ip_set_hash_gen.h b/net/netfilter/ipset/ip_set_hash_gen.h
+index 0bd6bf46f05f..867db1a3767b 100644
+--- a/net/netfilter/ipset/ip_set_hash_gen.h
++++ b/net/netfilter/ipset/ip_set_hash_gen.h
+@@ -1086,7 +1086,7 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
+ 			if (!test_bit(i, n->used))
+ 				k++;
+ 		}
+-		if (n->pos == 0 && k == 0) {
++		if (k == n->pos) {
+ 			t->hregion[r].ext_size -= ext_size(n->size, dsize);
+ 			rcu_assign_pointer(hbucket(t, key), NULL);
+ 			kfree_rcu(n, rcu);
+diff --git a/net/netfilter/nf_conntrack_expect.c b/net/netfilter/nf_conntrack_expect.c
+index 7bc64eb89bac..d51a7c5f1399 100644
+--- a/net/netfilter/nf_conntrack_expect.c
++++ b/net/netfilter/nf_conntrack_expect.c
+@@ -658,7 +658,19 @@ static int exp_seq_show(struct seq_file *s, void *v)
+ 	if (expect->flags & NF_CT_EXPECT_USERSPACE)
+ 		seq_printf(s, "%sUSERSPACE", delim);
+ 
+-	helper = rcu_dereference(nfct_help(expect->master)->helper);
++	/* Prefer the expectation's own helper.  The master conntrack is
++	 * SLAB_TYPESAFE_BY_RCU and can be kmem_cache_free()d while an
++	 * expectation still points at it; after reuse ->ext is cleared, so
++	 * nfct_help() may return NULL and must be checked before deref.
++	 * ctnetlink_exp_dump_expect() already does exactly this check.
++	 */
++	helper = expect->helper;
++	if (!helper) {
++		struct nf_conn_help *mhelp = nfct_help(expect->master);
++
++		if (mhelp)
++			helper = rcu_dereference(mhelp->helper);
++	}
+ 	if (helper) {
+ 		seq_printf(s, "%s%s", expect->flags ? " " : "", helper->name);
+ 		if (helper->expect_policy[expect->class].name[0])
+diff --git a/net/netfilter/nf_conntrack_proto_tcp.c b/net/netfilter/nf_conntrack_proto_tcp.c
+index 9545b64b897f..8f86addda322 100644
+--- a/net/netfilter/nf_conntrack_proto_tcp.c
++++ b/net/netfilter/nf_conntrack_proto_tcp.c
+@@ -406,7 +406,7 @@ static void tcp_sack(const struct sk_buff *skb, unsigned int dataoff,
+ 
+ 	/* Fast path for timestamp-only option */
+ 	if (length == TCPOLEN_TSTAMP_ALIGNED
+-	    && *(__be32 *)ptr == htonl((TCPOPT_NOP << 24)
++	    && get_unaligned_be32((__be32 *)ptr) == htonl((TCPOPT_NOP << 24)
+ 				       | (TCPOPT_NOP << 16)
+ 				       | (TCPOPT_TIMESTAMP << 8)
+ 				       | TCPOLEN_TIMESTAMP))
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 89cda664add7..6b361fb21f42 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-version1-opt37"
++echo "-android14-11-o-ltcdz5-v1.0-opt38"

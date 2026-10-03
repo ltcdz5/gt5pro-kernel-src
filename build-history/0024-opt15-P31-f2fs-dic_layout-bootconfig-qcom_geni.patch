@@ -1,0 +1,155 @@
+From b96307adfd22beb41465a1f5f14a7ee5ae7a94e1 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sat, 3 Oct 2026 02:20:19 +0800
+Subject: [PATCH 24/33] =?UTF-8?q?opt15-P31:=20f2fs=20=E8=A7=A3=E5=8E=8B?=
+ =?UTF-8?q?=E8=B7=AF=E5=BE=84=E6=94=B9=E7=94=A8=20dic=5Flayout=20+=20bootc?=
+ =?UTF-8?q?onfig=20=E4=B8=89=E4=BF=AE=E5=A4=8D=20+=20qcom=5Fgeni=20?=
+ =?UTF-8?q?=E4=B8=B2=E5=8F=A3?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+## A. f2fs: 让解压路径彻底不再为 layout 碰 dic->inode
+P30 已在 f2fs_free_dic()(晚释放/workqueue)把 f2fs_compress_layout(dic->inode)
+换成缓存字段 dic_layout。P31 把剩下两处也换掉:
+  compress.c:340   lz4_decompress_pages()      f2fs_compress_layout(dic->inode) -> dic->dic_layout
+  compress.c:1376  f2fs_decompress_cluster()   f2fs_compress_layout(dic->inode) -> dic->dic_layout
+这两处可在【软中断】里执行(in_task()==false 时整条解压链下沉; fixed-input 簇可达)。
+inode 此时仍被上锁的 pagecache 页 + VFS 读路径钉住 => 不构成 UAF,
+但既然缓存已就绪,换掉可让解压路径完全不碰 dic->inode。
+
+⛔ compress.c:2316(在 f2fs_alloc_dic 内部)故意保持原样:
+   改了会在缓存赋值之前引用缓存 => 真 bug。
+⚠ 坑: 340 行与 2316 行的 if 文本完全相同 => 必须按行号索引替换,不能用字符串 replace。
+
+## B. dic_layout 显式化
+原先它靠 f2fs_kmem_cache_alloc(..., GFP_F2FS_ZERO, ...) 的零填充拿到 0
+(= COMPRESS_FIXED_INPUT),是隐含依赖。已在字段处补注释说明它由
+f2fs_alloc_dic() 里的显式赋值设置、不依赖零填充。未改逻辑。
+
+## C. lib/bootconfig.c 三个上游修复
+  7c25edef09bb  fix off-by-one in xbc_verify_tree() unclosed node
+  8e0b204c47e1  check xbc_init_node() return in override path
+  e01dc9b8e267  fix snprintf truncation check in xbc_node_compose
+价值: bootconfig 是 Android 启动配置解析(/proc/bootconfig、boot 参数),
+解析 bug 可能影响启动参数读取。
+
+## D. drivers/tty/serial/qcom_geni_serial.c
+  6bfa51973214  ANDROID: serial: qcom-geni: Add support for ...
+本机串口就是 qcom_geni(lsmod 可见 msm_geni_serial)。
+
+## 未纳入
+  047b9b395380  xfrm: esp: ipv4: fix up flags setting —— 跳过。
+    原因: 树里 net/ipv4/ip_output.c 权限是 100755,补丁期望 100644
+          => git apply --check 失败("has type 100755, expected 100644")。
+    价值也低(1 行 flags 修正),不值得为它改文件权限。
+
+## CRC 安全性
+全部为单文件 .c / 小成套,不新增导出、不碰中枢结构体头文件:
+  fs/f2fs/f2fs.h 改的是 struct decompress_io_ctx(无任何 EXPORT 引用)
+  其余都是纯 .c
+=> 闸门实测确认(见下)。
+
+## 验证
+  make rc=0 错误=0
+  闸门1  新增=50 消失=1 | 命中厂商 新增=0 消失=0  PASS
+  闸门2  会拒绝装载的模块 = 1 (system_dlkm/bluetooth.ko, sk_filter_trim_cap)
+  横幅   #58-ack303-p31
+---
+ drivers/tty/serial/qcom_geni_serial.c | 4 ++++
+ fs/f2fs/compress.c                    | 4 ++--
+ fs/f2fs/f2fs.h                        | 4 +++-
+ lib/bootconfig.c                      | 7 ++++---
+ 4 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/tty/serial/qcom_geni_serial.c b/drivers/tty/serial/qcom_geni_serial.c
+index 148706ab2c4f..da14d91f47f8 100644
+--- a/drivers/tty/serial/qcom_geni_serial.c
++++ b/drivers/tty/serial/qcom_geni_serial.c
+@@ -20,6 +20,7 @@
+ #include <linux/serial.h>
+ #include <linux/serial_core.h>
+ #include <linux/slab.h>
++#include <linux/suspend.h>
+ #include <linux/tty.h>
+ #include <linux/tty_flip.h>
+ #include <dt-bindings/interconnect/qcom,icc.h>
+@@ -1736,6 +1737,9 @@ static int qcom_geni_serial_sys_resume(struct device *dev)
+ 	struct uart_port *uport = &port->uport;
+ 	struct qcom_geni_private_data *private_data = uport->private_data;
+ 
++	if (pm_suspend_target_state == PM_SUSPEND_MEM)
++		port->setup = false;
++
+ 	ret = uart_resume_port(private_data->drv, uport);
+ 	if (uart_console(uport)) {
+ 		geni_icc_set_tag(&port->se, QCOM_ICC_TAG_ALWAYS);
+diff --git a/fs/f2fs/compress.c b/fs/f2fs/compress.c
+index 227cc352bede..6ca4aaebf4fa 100755
+--- a/fs/f2fs/compress.c
++++ b/fs/f2fs/compress.c
+@@ -337,7 +337,7 @@ static int lz4_decompress_pages(struct decompress_io_ctx *dic)
+ #endif
+ 	int ret = 0;
+ 
+-	if (f2fs_compress_layout(dic->inode) == COMPRESS_FIXED_INPUT) {
++	if (dic->dic_layout == COMPRESS_FIXED_INPUT) {
+ 		expected = PAGE_SIZE << dic->log_cluster_size;
+ 		ret = LZ4_decompress_safe(dic->cbuf->cdata, dic->rbuf,
+ 						dic->clen, dic->rlen);
+@@ -1373,7 +1373,7 @@ void f2fs_decompress_cluster(struct decompress_io_ctx *dic, bool in_task)
+ 	trace_f2fs_decompress_pages_start(dic->inode, dic->cluster_idx,
+ 				dic->cluster_size, fi->i_compress_algorithm);
+ 
+-	if (f2fs_compress_layout(dic->inode) == COMPRESS_FIXED_INPUT)
++	if (dic->dic_layout == COMPRESS_FIXED_INPUT)
+ 		ret = f2fs_fixed_input_decompress_cluster(dic, in_task);
+ #ifdef CONFIG_F2FS_FS_COMPRESSION_FIXED_OUTPUT
+ 	else
+diff --git a/fs/f2fs/f2fs.h b/fs/f2fs/f2fs.h
+index 718a1d7b8f0c..042538149c66 100644
+--- a/fs/f2fs/f2fs.h
++++ b/fs/f2fs/f2fs.h
+@@ -1797,7 +1797,9 @@ struct decompress_io_ctx {
+ 	bool failed;			/* IO error occurred before decompression? */
+ 	bool need_verity;		/* need fs-verity verification after decompression? */
+ 	unsigned char compress_algorithm;	/* backup algorithm type */
+-	unsigned char dic_layout;		/* cached compress layout, safe on late-free path */
++	unsigned char dic_layout;		/* cached compress layout, safe on late-free path. */
++					/* Set explicitly in f2fs_alloc_dic() right after the
++					 * GFP_F2FS_ZERO alloc, so it never relies on zeroing. */
+ 	void *private;			/* payload buffer for specified decompression algorithm */
+ 	void *private2;			/* extra payload buffer */
+ 	struct work_struct verity_work;	/* work to verify the decompressed pages */
+diff --git a/lib/bootconfig.c b/lib/bootconfig.c
+index 97f8911ea339..08ac5e0c5138 100644
+--- a/lib/bootconfig.c
++++ b/lib/bootconfig.c
+@@ -318,7 +318,7 @@ int __init xbc_node_compose_key_after(struct xbc_node *root,
+ 			       depth ? "." : "");
+ 		if (ret < 0)
+ 			return ret;
+-		if (ret > size) {
++		if (ret >= size) {
+ 			size = 0;
+ 		} else {
+ 			size -= ret;
+@@ -714,7 +714,8 @@ static int __init xbc_parse_kv(char **k, char *v, int op)
+ 		if (op == ':') {
+ 			unsigned short nidx = child->next;
+ 
+-			xbc_init_node(child, v, XBC_VALUE);
++			if (xbc_init_node(child, v, XBC_VALUE) < 0)
++				return xbc_parse_error("Failed to override value", v);
+ 			child->next = nidx;	/* keep subkeys */
+ 			goto array;
+ 		}
+@@ -793,7 +794,7 @@ static int __init xbc_verify_tree(void)
+ 
+ 	/* Brace closing */
+ 	if (brace_index) {
+-		n = &xbc_nodes[open_brace[brace_index]];
++		n = &xbc_nodes[open_brace[brace_index - 1]];
+ 		return xbc_parse_error("Brace is not closed",
+ 					xbc_node_get_data(n));
+ 	}

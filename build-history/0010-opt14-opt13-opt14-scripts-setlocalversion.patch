@@ -1,0 +1,23 @@
+From 88488d6a5c69881bd3711cfbf6f83f1bae9ee5f5 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 00:12:45 +0800
+Subject: [PATCH 10/33] =?UTF-8?q?opt14:=20=E7=89=88=E6=9C=AC=E5=90=8E?=
+ =?UTF-8?q?=E7=BC=80=20opt13=20->=20opt14=20(scripts/setlocalversion)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ scripts/setlocalversion | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 9388dc6026e6..714b2d9d641e 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-opt13"
++echo "-android14-11-o-ltcdz5-opt14"

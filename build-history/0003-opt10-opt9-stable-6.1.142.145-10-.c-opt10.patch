@@ -1,0 +1,315 @@
+From 495c039ac7ea7495724e05ccfa60a3757fa1631b Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 01:31:48 +0800
+Subject: [PATCH 03/33] =?UTF-8?q?opt10=20=3D=20opt9=20+=20stable=206.1.142?=
+ =?UTF-8?q?..145=20=E4=B8=AD=E8=87=AA=E6=B4=BD=E8=90=BD=E5=9C=B0=E7=9A=84?=
+ =?UTF-8?q?=2010=20=E4=B8=AA=E7=BA=AF=20.c=20=E4=BF=AE=E5=A4=8D=20+=20?=
+ =?UTF-8?q?=E5=90=8E=E7=BC=80=20-opt10?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+落地面: block/blk-mq-debugfs.c fs/filesystems.c kernel/power/wakelock.c
+        mm/hugetlb_cgroup.c net/core/gen_estimator.c net/ipv6/ila/ila_common.c
+        net/ipv6/ipv6_sockglue.c net/ipv6/netfilter.c net/sched/sch_prio.c
+        security/selinux/xfrm.c
+退回原因: 头文件/.S/dts/Kconfig 类改动 92 个 —— stable 的 .c 假设上游头,
+          我们的头被 Oplus 改过, 逐文件套会造成 141 个编译错(cred.c/rtmutex.c/
+          posix-timers.c 等 "结构体成员不存在")。只保留不需要头变更的那批。
+实测闸: 新增导出 0 / 命中厂商 .ko 引用 0; config 与 opt9 差 0 行;
+        全类型 BTF 与 opt9 差 0 行(sk_buff 192->216 是 opt9 自带的, 非本版引入)。
+---
+ block/blk-mq-debugfs.c    |  2 +-
+ fs/filesystems.c          | 14 +++++++++-----
+ kernel/power/wakelock.c   |  3 +++
+ mm/hugetlb_cgroup.c       | 34 ++++++++++++++++++----------------
+ net/core/gen_estimator.c  |  2 +-
+ net/ipv6/ila/ila_common.c |  6 +++---
+ net/ipv6/ipv6_sockglue.c  |  3 +--
+ net/ipv6/netfilter.c      | 12 ++++++------
+ net/sched/sch_prio.c      |  2 +-
+ scripts/setlocalversion   |  2 +-
+ security/selinux/xfrm.c   |  2 +-
+ 11 files changed, 45 insertions(+), 37 deletions(-)
+
+diff --git a/block/blk-mq-debugfs.c b/block/blk-mq-debugfs.c
+index 786992aaabc5..cf5204129e79 100644
+--- a/block/blk-mq-debugfs.c
++++ b/block/blk-mq-debugfs.c
+@@ -427,7 +427,7 @@ static void blk_mq_debugfs_tags_show(struct seq_file *m,
+ 	seq_printf(m, "nr_tags=%u\n", tags->nr_tags);
+ 	seq_printf(m, "nr_reserved_tags=%u\n", tags->nr_reserved_tags);
+ 	seq_printf(m, "active_queues=%d\n",
+-		   atomic_read(&tags->active_queues));
++		   READ_ONCE(tags->active_queues));
+ 
+ 	seq_puts(m, "\nbitmap_tags:\n");
+ 	sbitmap_queue_show(&tags->bitmap_tags, m);
+diff --git a/fs/filesystems.c b/fs/filesystems.c
+index 58b9067b2391..95e5256821a5 100644
+--- a/fs/filesystems.c
++++ b/fs/filesystems.c
+@@ -156,15 +156,19 @@ static int fs_index(const char __user * __name)
+ static int fs_name(unsigned int index, char __user * buf)
+ {
+ 	struct file_system_type * tmp;
+-	int len, res;
++	int len, res = -EINVAL;
+ 
+ 	read_lock(&file_systems_lock);
+-	for (tmp = file_systems; tmp; tmp = tmp->next, index--)
+-		if (index <= 0 && try_module_get(tmp->owner))
++	for (tmp = file_systems; tmp; tmp = tmp->next, index--) {
++		if (index == 0) {
++			if (try_module_get(tmp->owner))
++				res = 0;
+ 			break;
++		}
++	}
+ 	read_unlock(&file_systems_lock);
+-	if (!tmp)
+-		return -EINVAL;
++	if (res)
++		return res;
+ 
+ 	/* OK, we got the reference, so we can safely block */
+ 	len = strlen(tmp->name) + 1;
+diff --git a/kernel/power/wakelock.c b/kernel/power/wakelock.c
+index 52571dcad768..4e941999a53b 100644
+--- a/kernel/power/wakelock.c
++++ b/kernel/power/wakelock.c
+@@ -49,6 +49,9 @@ ssize_t pm_show_wakelocks(char *buf, bool show_active)
+ 			len += sysfs_emit_at(buf, len, "%s ", wl->name);
+ 	}
+ 
++	if (len > 0)
++		--len;
++
+ 	len += sysfs_emit_at(buf, len, "\n");
+ 
+ 	mutex_unlock(&wakelocks_lock);
+diff --git a/mm/hugetlb_cgroup.c b/mm/hugetlb_cgroup.c
+index f61d132df52b..32f4408eda24 100644
+--- a/mm/hugetlb_cgroup.c
++++ b/mm/hugetlb_cgroup.c
+@@ -191,8 +191,9 @@ static void hugetlb_cgroup_move_parent(int idx, struct hugetlb_cgroup *h_cg,
+ 	struct page_counter *counter;
+ 	struct hugetlb_cgroup *page_hcg;
+ 	struct hugetlb_cgroup *parent = parent_hugetlb_cgroup(h_cg);
++	struct folio *folio = page_folio(page);
+ 
+-	page_hcg = hugetlb_cgroup_from_page(page);
++	page_hcg = hugetlb_cgroup_from_folio(folio);
+ 	/*
+ 	 * We can have pages in active list without any cgroup
+ 	 * ie, hugepage with less than 3 pages. We can safely
+@@ -314,7 +315,7 @@ static void __hugetlb_cgroup_commit_charge(int idx, unsigned long nr_pages,
+ 	if (hugetlb_cgroup_disabled() || !h_cg)
+ 		return;
+ 
+-	__set_hugetlb_cgroup(page, h_cg, rsvd);
++	__set_hugetlb_cgroup(page_folio(page), h_cg, rsvd);
+ 	if (!rsvd) {
+ 		unsigned long usage =
+ 			h_cg->nodeinfo[page_to_nid(page)]->usage[idx];
+@@ -345,18 +346,18 @@ void hugetlb_cgroup_commit_charge_rsvd(int idx, unsigned long nr_pages,
+ /*
+  * Should be called with hugetlb_lock held
+  */
+-static void __hugetlb_cgroup_uncharge_page(int idx, unsigned long nr_pages,
+-					   struct page *page, bool rsvd)
++static void __hugetlb_cgroup_uncharge_folio(int idx, unsigned long nr_pages,
++					   struct folio *folio, bool rsvd)
+ {
+ 	struct hugetlb_cgroup *h_cg;
+ 
+ 	if (hugetlb_cgroup_disabled())
+ 		return;
+ 	lockdep_assert_held(&hugetlb_lock);
+-	h_cg = __hugetlb_cgroup_from_page(page, rsvd);
++	h_cg = __hugetlb_cgroup_from_folio(folio, rsvd);
+ 	if (unlikely(!h_cg))
+ 		return;
+-	__set_hugetlb_cgroup(page, NULL, rsvd);
++	__set_hugetlb_cgroup(folio, NULL, rsvd);
+ 
+ 	page_counter_uncharge(__hugetlb_cgroup_counter_from_cgroup(h_cg, idx,
+ 								   rsvd),
+@@ -366,27 +367,27 @@ static void __hugetlb_cgroup_uncharge_page(int idx, unsigned long nr_pages,
+ 		css_put(&h_cg->css);
+ 	else {
+ 		unsigned long usage =
+-			h_cg->nodeinfo[page_to_nid(page)]->usage[idx];
++			h_cg->nodeinfo[folio_nid(folio)]->usage[idx];
+ 		/*
+ 		 * This write is not atomic due to fetching usage and writing
+ 		 * to it, but that's fine because we call this with
+ 		 * hugetlb_lock held anyway.
+ 		 */
+-		WRITE_ONCE(h_cg->nodeinfo[page_to_nid(page)]->usage[idx],
++		WRITE_ONCE(h_cg->nodeinfo[folio_nid(folio)]->usage[idx],
+ 			   usage - nr_pages);
+ 	}
+ }
+ 
+-void hugetlb_cgroup_uncharge_page(int idx, unsigned long nr_pages,
+-				  struct page *page)
++void hugetlb_cgroup_uncharge_folio(int idx, unsigned long nr_pages,
++				  struct folio *folio)
+ {
+-	__hugetlb_cgroup_uncharge_page(idx, nr_pages, page, false);
++	__hugetlb_cgroup_uncharge_folio(idx, nr_pages, folio, false);
+ }
+ 
+-void hugetlb_cgroup_uncharge_page_rsvd(int idx, unsigned long nr_pages,
+-				       struct page *page)
++void hugetlb_cgroup_uncharge_folio_rsvd(int idx, unsigned long nr_pages,
++				       struct folio *folio)
+ {
+-	__hugetlb_cgroup_uncharge_page(idx, nr_pages, page, true);
++	__hugetlb_cgroup_uncharge_folio(idx, nr_pages, folio, true);
+ }
+ 
+ static void __hugetlb_cgroup_uncharge_cgroup(int idx, unsigned long nr_pages,
+@@ -888,13 +889,14 @@ void hugetlb_cgroup_migrate(struct page *oldhpage, struct page *newhpage)
+ 	struct hugetlb_cgroup *h_cg;
+ 	struct hugetlb_cgroup *h_cg_rsvd;
+ 	struct hstate *h = page_hstate(oldhpage);
++	struct folio *old_folio = page_folio(oldhpage);
+ 
+ 	if (hugetlb_cgroup_disabled())
+ 		return;
+ 
+ 	spin_lock_irq(&hugetlb_lock);
+-	h_cg = hugetlb_cgroup_from_page(oldhpage);
+-	h_cg_rsvd = hugetlb_cgroup_from_page_rsvd(oldhpage);
++	h_cg = hugetlb_cgroup_from_folio(old_folio);
++	h_cg_rsvd = hugetlb_cgroup_from_folio_rsvd(old_folio);
+ 	set_hugetlb_cgroup(oldhpage, NULL);
+ 	set_hugetlb_cgroup_rsvd(oldhpage, NULL);
+ 
+diff --git a/net/core/gen_estimator.c b/net/core/gen_estimator.c
+index 4fcbdd71c59f..e0654e3a9286 100644
+--- a/net/core/gen_estimator.c
++++ b/net/core/gen_estimator.c
+@@ -206,7 +206,7 @@ void gen_kill_estimator(struct net_rate_estimator __rcu **rate_est)
+ {
+ 	struct net_rate_estimator *est;
+ 
+-	est = xchg((__force struct net_rate_estimator **)rate_est, NULL);
++	est = unrcu_pointer(xchg(rate_est, NULL));
+ 	if (est) {
+ 		del_timer_sync(&est->timer);
+ 		kfree_rcu(est, rcu);
+diff --git a/net/ipv6/ila/ila_common.c b/net/ipv6/ila/ila_common.c
+index 95e9146918cc..b8d43ed4689d 100644
+--- a/net/ipv6/ila/ila_common.c
++++ b/net/ipv6/ila/ila_common.c
+@@ -86,7 +86,7 @@ static void ila_csum_adjust_transport(struct sk_buff *skb,
+ 
+ 			diff = get_csum_diff(ip6h, p);
+ 			inet_proto_csum_replace_by_diff(&th->check, skb,
+-							diff, true);
++							diff, true, true);
+ 		}
+ 		break;
+ 	case NEXTHDR_UDP:
+@@ -97,7 +97,7 @@ static void ila_csum_adjust_transport(struct sk_buff *skb,
+ 			if (uh->check || skb->ip_summed == CHECKSUM_PARTIAL) {
+ 				diff = get_csum_diff(ip6h, p);
+ 				inet_proto_csum_replace_by_diff(&uh->check, skb,
+-								diff, true);
++								diff, true, true);
+ 				if (!uh->check)
+ 					uh->check = CSUM_MANGLED_0;
+ 			}
+@@ -111,7 +111,7 @@ static void ila_csum_adjust_transport(struct sk_buff *skb,
+ 
+ 			diff = get_csum_diff(ip6h, p);
+ 			inet_proto_csum_replace_by_diff(&ih->icmp6_cksum, skb,
+-							diff, true);
++							diff, true, true);
+ 		}
+ 		break;
+ 	}
+diff --git a/net/ipv6/ipv6_sockglue.c b/net/ipv6/ipv6_sockglue.c
+index 532f4478c884..2924aa45adbc 100644
+--- a/net/ipv6/ipv6_sockglue.c
++++ b/net/ipv6/ipv6_sockglue.c
+@@ -111,8 +111,7 @@ struct ipv6_txoptions *ipv6_update_options(struct sock *sk,
+ 			icsk->icsk_sync_mss(sk, icsk->icsk_pmtu_cookie);
+ 		}
+ 	}
+-	opt = xchg((__force struct ipv6_txoptions **)&inet6_sk(sk)->opt,
+-		   opt);
++	opt = unrcu_pointer(xchg(&inet6_sk(sk)->opt, RCU_INITIALIZER(opt)));
+ 	sk_dst_reset(sk);
+ 
+ 	return opt;
+diff --git a/net/ipv6/netfilter.c b/net/ipv6/netfilter.c
+index 857713d7a38a..d873658fc821 100644
+--- a/net/ipv6/netfilter.c
++++ b/net/ipv6/netfilter.c
+@@ -163,20 +163,20 @@ int br_ip6_fragment(struct net *net, struct sock *sk, struct sk_buff *skb,
+ 		struct ip6_fraglist_iter iter;
+ 		struct sk_buff *frag2;
+ 
+-		if (first_len - hlen > mtu ||
+-		    skb_headroom(skb) < (hroom + sizeof(struct frag_hdr)))
++		if (first_len - hlen > mtu)
+ 			goto blackhole;
+ 
+-		if (skb_cloned(skb))
++		if (skb_cloned(skb) ||
++		    skb_headroom(skb) < (hroom + sizeof(struct frag_hdr)))
+ 			goto slow_path;
+ 
+ 		skb_walk_frags(skb, frag2) {
+-			if (frag2->len > mtu ||
+-			    skb_headroom(frag2) < (hlen + hroom + sizeof(struct frag_hdr)))
++			if (frag2->len > mtu)
+ 				goto blackhole;
+ 
+ 			/* Partially cloned skb? */
+-			if (skb_shared(frag2))
++			if (skb_shared(frag2) ||
++			    skb_headroom(frag2) < (hlen + hroom + sizeof(struct frag_hdr)))
+ 				goto slow_path;
+ 		}
+ 
+diff --git a/net/sched/sch_prio.c b/net/sched/sch_prio.c
+index fdc5ef52c3ee..fdd9caa41e80 100644
+--- a/net/sched/sch_prio.c
++++ b/net/sched/sch_prio.c
+@@ -211,7 +211,7 @@ static int prio_tune(struct Qdisc *sch, struct nlattr *opt,
+ 	memcpy(q->prio2band, qopt->priomap, TC_PRIO_MAX+1);
+ 
+ 	for (i = q->bands; i < oldbands; i++)
+-		qdisc_tree_flush_backlog(q->queues[i]);
++		qdisc_purge_queue(q->queues[i]);
+ 
+ 	for (i = oldbands; i < q->bands; i++) {
+ 		q->queues[i] = queues[i];
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 2746c63aa11d..cd235c3bfdc4 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-opt9"
++echo "-android14-11-o-ltcdz5-opt10"
+diff --git a/security/selinux/xfrm.c b/security/selinux/xfrm.c
+index c576832febc6..0adf4099e57c 100644
+--- a/security/selinux/xfrm.c
++++ b/security/selinux/xfrm.c
+@@ -95,7 +95,7 @@ static int selinux_xfrm_alloc_user(struct xfrm_sec_ctx **ctxp,
+ 
+ 	ctx->ctx_doi = XFRM_SC_DOI_LSM;
+ 	ctx->ctx_alg = XFRM_SC_ALG_SELINUX;
+-	ctx->ctx_len = str_len;
++	ctx->ctx_len = str_len + 1;
+ 	memcpy(ctx->ctx_str, &uctx[1], str_len);
+ 	ctx->ctx_str[str_len] = '\0';
+ 	rc = security_context_to_sid(&selinux_state, ctx->ctx_str, str_len,

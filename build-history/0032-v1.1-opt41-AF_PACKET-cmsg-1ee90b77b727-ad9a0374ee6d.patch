@@ -1,0 +1,129 @@
+From e5f8f1aa13a8f812d1734445cb0e4d09925c862d Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sat, 3 Oct 2026 17:56:11 +0800
+Subject: [PATCH 32/33] =?UTF-8?q?v1.1-opt41:=20=E4=BF=AE=20AF=5FPACKET=20?=
+ =?UTF-8?q?=E6=97=B6=E9=97=B4=E6=88=B3=20cmsg=20=E8=B6=8A=E7=95=8C?=
+ =?UTF-8?q?=E8=AF=BB=EF=BC=88=E4=B8=8A=E6=B8=B8=201ee90b77b727=20/=20?=
+ =?UTF-8?q?=E8=B4=A6=E6=9C=AC=20ad9a0374ee6d=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+## 来源
+用**账本法**从 builder 自己的账本里筛出来的：
+`~/ack4_gap/0236__ad9a0374ee6d__include__net__sock.h.patch` + 0237 + 0238（同属一个提交）
+三个文件在本树**全部未应用**，且能干净打上。
+
+## 漏洞（作者 Kyle Zeng <kylebot@openai.com>，2026-06-06）
+`net/socket.c` 的 `skb_is_err_queue()` **只凭 `skb->pkt_type == PACKET_OUTGOING`** 判定
+"这是错误队列的 skb"。但这个假设对 **AF_PACKET** 不成立：
+AF_PACKET 的**发包 tap** 也以 `PACKET_OUTGOING` 投递给 packet socket，
+而它的 `skb->cb` 属于 AF_PACKET，**不是 `struct sock_exterr_skb`**。
+
+若这样的 skb 在开启时间戳的 socket 上被收到，通用时间戳 cmsg 路径会把
+**AF_PACKET 的控制缓冲状态当成 `sock_exterr_skb::opt_stats` 来读**。
+开着 `SO_RXQ_OVFL` 时，**丢包计数与 `opt_stats` 重叠**；
+**丢包数为奇数**就会让该路径用 `skb->len` 与 `skb->data` 发出
+`SCM_TIMESTAMPING_OPT_STATS` ⇒ **对非线性 skb 会读越线性头**
+⇒ 触发 **hardened usercopy** 或**泄露相邻堆内容**。
+
+## 修法（照上游）
+`skb_is_err_queue()` 除 `PACKET_OUTGOING` 外，**再要求 `skb->destructor == sock_rmem_free`**
+（该析构函数是 `sock_queue_err_skb()` 装的）。为此把 `sock_rmem_free` 由 `static` 改为外部可见，
+并在 `include/net/sock.h` 加一行原型声明。
+- AF_PACKET 的接收 skb 用普通接收所有权 ⇒ 不再被误判为错误队列 skb
+- 真正的 `sk_error_queue` 条目仍同时具备 `PACKET_OUTGOING` + `sock_rmem_free` ⇒ 行为不变
+
+## 可达性（三条判据实测）
+1. `out/.config`：AF_PACKET / socket 栈本就编入
+2. `out/` 下有对应 `.o`（`net/socket.o`、`net/core/skbuff.o`）
+3. ★ **用户态真在用**：设备实测 **`/proc/net/packet` 有 8 个 AF_PACKET socket**
+   （UID 1010/1000 = system；协议覆盖 IPv4 `0800`、IPv6 `890d`、其它以太类型 `88b4`/`888e`）
+   ⇒ 前置条件满足。触发还需该 socket 上开 `SO_TIMESTAMPING` + `SO_RXQ_OVFL`（较特殊但可达）。
+   `kallsyms` 佐证：`sock_rmem_free` 当前是 `t`（local/static），正是本修复要改成全局的那个。
+
+## 验证
+  make rc=0 错误=0
+  ★ crc_diff（新工具首次实战）：CRC 变化 **0** ⇒ 厂商 493 个 .ko 不受影响
+     （头文件只加一行函数声明，不动任何结构体 ⇒ 符合已确立的判据）
+  闸门1  新增=50 消失=1 | 命中厂商 新增=0 消失=0   PASS
+  闸门2  会拒绝装载的模块 = 1（system_dlkm/bluetooth.ko, sk_filter_trim_cap）
+  版本串 6.1.141-android14-11-o-ltcdz5-v1.1-opt41
+  横幅   #67-ack304-v1.1-opt41
+  Image  38,095,360 B（与 opt40 同大小）
+---
+ include/net/sock.h      |  1 +
+ net/core/skbuff.c       |  6 +++---
+ net/socket.c            | 11 ++++++-----
+ scripts/setlocalversion |  2 +-
+ 4 files changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/include/net/sock.h b/include/net/sock.h
+index 4487150cb462..5de6955ab0e9 100644
+--- a/include/net/sock.h
++++ b/include/net/sock.h
+@@ -1909,6 +1909,7 @@ struct sk_buff *sock_omalloc(struct sock *sk, unsigned long size,
+ 			     gfp_t priority);
+ void skb_orphan_partial(struct sk_buff *skb);
+ void sock_rfree(struct sk_buff *skb);
++void sock_rmem_free(struct sk_buff *skb);
+ void sock_efree(struct sk_buff *skb);
+ #ifdef CONFIG_INET
+ void sock_edemux(struct sk_buff *skb);
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+index 73134faf3cc7..1bc23b7aa3c0 100644
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -4804,7 +4804,7 @@ int skb_cow_data(struct sk_buff *skb, int tailbits, struct sk_buff **trailer)
+ }
+ EXPORT_SYMBOL_GPL(skb_cow_data);
+ 
+-static void sock_rmem_free(struct sk_buff *skb)
++void sock_rmem_free(struct sk_buff *skb)
+ {
+ 	struct sock *sk = skb->sk;
+ 
+@@ -4813,8 +4813,8 @@ static void sock_rmem_free(struct sk_buff *skb)
+ 
+ static void skb_set_err_queue(struct sk_buff *skb)
+ {
+-	/* pkt_type of skbs received on local sockets is never PACKET_OUTGOING.
+-	 * So, it is safe to (mis)use it to mark skbs on the error queue.
++	/* The error-queue test in skb_is_err_queue() matches this marker
++	 * with the sock_rmem_free destructor installed by sock_queue_err_skb().
+ 	 */
+ 	skb->pkt_type = PACKET_OUTGOING;
+ 	BUILD_BUG_ON(PACKET_OUTGOING == 0);
+diff --git a/net/socket.c b/net/socket.c
+index 000e0badf3fa..bc16880ca04f 100644
+--- a/net/socket.c
++++ b/net/socket.c
+@@ -805,12 +805,13 @@ EXPORT_SYMBOL(kernel_sendmsg_locked);
+ 
+ static bool skb_is_err_queue(const struct sk_buff *skb)
+ {
+-	/* pkt_type of skbs enqueued on the error queue are set to
+-	 * PACKET_OUTGOING in skb_set_err_queue(). This is only safe to do
+-	 * in recvmsg, since skbs received on a local socket will never
+-	 * have a pkt_type of PACKET_OUTGOING.
++	/* Error-queue skbs are marked as PACKET_OUTGOING in
++	 * skb_set_err_queue() and use the destructor installed by
++	 * sock_queue_err_skb(). PACKET_OUTGOING alone is not unique:
++	 * AF_PACKET outgoing taps use the same pkt_type.
+ 	 */
+-	return skb->pkt_type == PACKET_OUTGOING;
++	return skb->pkt_type == PACKET_OUTGOING &&
++	       skb->destructor == sock_rmem_free;
+ }
+ 
+ /* On transmit, software and hardware timestamps are returned independently.
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 756a5d28071f..faa331f724d5 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-v1.1-opt40"
++echo "-android14-11-o-ltcdz5-v1.1-opt41"

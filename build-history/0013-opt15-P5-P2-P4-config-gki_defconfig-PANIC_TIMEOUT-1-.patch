@@ -1,0 +1,104 @@
+From 1df7a34f6453c53145a91e0b87f64f32f370e993 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 03:37:46 +0800
+Subject: [PATCH 13/33] =?UTF-8?q?opt15-P5:=20=E6=8A=8A=20P2/P4=20=E7=9A=84?=
+ =?UTF-8?q?=20config=20=E5=A2=9E=E9=87=8F=E5=BD=95=E8=BF=9B=20gki=5Fdefcon?=
+ =?UTF-8?q?fig,=20=E4=BD=BF=E6=9E=84=E5=BB=BA=E5=8F=AF=E5=A4=8D=E7=8E=B0;?=
+ =?UTF-8?q?=20PANIC=5FTIMEOUT=20-1=20->=2030?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+背景:
+  P2(社区 config 10 项) 与 P4(ThinLTO) 此前只改 out/.config, 而 out/ 被 gitignore
+  => 从 234e0260e 重新 clone 构建会得到 opt15c 的配置, 不是 P4。这是可复现性缺口。
+
+本提交:
+  1) 把 P4 相对 gki_defconfig 的 25 项增量写进 arch/arm64/configs/gki_defconfig:
+     HZ 250->300, ThinLTO(关 LTO_NONE), ARM 加密指令(SHA3/SM3/SM4/AES-CCM),
+     EROFS LZMA+DEFLATE, NET_SCH_ETS/PIE, RCU_NOCB_CPU_DEFAULT_ALL/_CB_BOOST,
+     SLAB_MERGE_DEFAULT, SECTION_MISMATCH_WARN_ONLY, SECURITY_LANDLOCK,
+     SECURITY_PATH, XZ_DEC_MICROLZMA, ZRAM_MEMORY_TRACKING, KFENCE 采样 0
+  2) 同时删掉被这些东西取代/覆盖的旧键(HZ_250, LTO_NONE) 与 opt13 减脂已关的
+     UBSAN 全家 / INIT_ON_ALLOC_DEFAULT_ON, 并去掉重复键
+  3) CONFIG_PANIC_TIMEOUT: -1 -> 30
+     理由: 本机 CONFIG_PANIC_ON_OOPS=y, 而 -1 表示 panic 后永不自动重启 =>
+           oops 会变成黑屏卡死(需手动长按电源)。改成 30 秒后自动重启,
+           用"可能丢一次现场"换"不会卡死"。
+
+验证:
+  make ARCH=arm64 gki_defconfig 重新生成的 config 与 P4 实质一致
+  (仅剩 3 项编译器能力探测项 CONFIG_CC_HAS_UBSAN_*, 无法在 defconfig 里设)
+  构建 rc=0; 闸门1 导出集合 PASS(新增=22 消失=0 命中厂商 0/0)
+  闸门2 厂商 CRC 真值: 仅 bluetooth.ko(sk_filter_trim_cap, 基线就不符, 与 opt14 相同)
+---
+ arch/arm64/configs/gki_defconfig | 32 ++++++++++++++++++++++++++------
+ 1 file changed, 26 insertions(+), 6 deletions(-)
+ mode change 100755 => 100644 arch/arm64/configs/gki_defconfig
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+old mode 100755
+new mode 100644
+index 9cf62576a209..ae85cfa454bd
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -713,7 +713,6 @@ CONFIG_FORTIFY_SOURCE=y
+ CONFIG_STATIC_USERMODEHELPER=y
+ CONFIG_STATIC_USERMODEHELPER_PATH=""
+ CONFIG_SECURITY_SELINUX=y
+-CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+ CONFIG_CRYPTO_ECDH=y
+ CONFIG_CRYPTO_DES=y
+ CONFIG_CRYPTO_ADIANTUM=y
+@@ -746,9 +745,6 @@ CONFIG_MODULE_ALLOW_BTF_MISMATCH=y
+ # CONFIG_HEADERS_INSTALL is not set
+ # CONFIG_SECTION_MISMATCH_WARN_ONLY is not set
+ CONFIG_MAGIC_SYSRQ=y
+-CONFIG_UBSAN=y
+-CONFIG_UBSAN_TRAP=y
+-CONFIG_UBSAN_LOCAL_BOUNDS=y
+ # CONFIG_UBSAN_SHIFT is not set
+ # CONFIG_UBSAN_BOOL is not set
+ # CONFIG_UBSAN_ENUM is not set
+@@ -759,11 +755,10 @@ CONFIG_DEBUG_MEMORY_INIT=y
+ CONFIG_KASAN=y
+ CONFIG_KASAN_HW_TAGS=y
+ CONFIG_KFENCE=y
+-CONFIG_KFENCE_SAMPLE_INTERVAL=500
+ CONFIG_KFENCE_NUM_OBJECTS=63
+ CONFIG_KFENCE_STATIC_KEYS=y
+ CONFIG_PANIC_ON_OOPS=y
+-CONFIG_PANIC_TIMEOUT=-1
++CONFIG_PANIC_TIMEOUT=30
+ CONFIG_SOFTLOCKUP_DETECTOR=y
+ CONFIG_WQ_WATCHDOG=y
+ CONFIG_SCHEDSTATS=y
+@@ -824,3 +819,28 @@ CONFIG_IP_SET_LIST_SET=y
+ CONFIG_IP6_NF_NAT=y
+ CONFIG_IP6_NF_TARGET_MASQUERADE=y
+ CONFIG_BBG=y
++CONFIG_CRYPTO_AES_ARM64_CE_CCM=y
++CONFIG_CRYPTO_SHA3=y
++CONFIG_CRYPTO_SHA3_ARM64=y
++CONFIG_CRYPTO_SM3=y
++CONFIG_CRYPTO_SM3_ARM64_CE=y
++CONFIG_CRYPTO_SM4=y
++CONFIG_CRYPTO_SM4_ARM64_CE=y
++CONFIG_CRYPTO_SM4_ARM64_CE_BLK=y
++CONFIG_EROFS_FS_ZIP_LZMA=y
++CONFIG_HZ=300
++CONFIG_HZ_300=y
++CONFIG_KFENCE_SAMPLE_INTERVAL=0
++CONFIG_LTO=y
++CONFIG_LTO_CLANG=y
++CONFIG_LTO_CLANG_THIN=y
++CONFIG_NET_SCH_ETS=y
++CONFIG_NET_SCH_PIE=y
++CONFIG_RCU_NOCB_CPU_CB_BOOST=y
++CONFIG_RCU_NOCB_CPU_DEFAULT_ALL=y
++CONFIG_SECTION_MISMATCH_WARN_ONLY=y
++CONFIG_SECURITY_LANDLOCK=y
++CONFIG_SECURITY_PATH=y
++CONFIG_SLAB_MERGE_DEFAULT=y
++CONFIG_XZ_DEC_MICROLZMA=y
++CONFIG_ZRAM_MEMORY_TRACKING=y

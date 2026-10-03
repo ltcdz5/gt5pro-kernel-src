@@ -1,0 +1,99 @@
+From a79799cda102d66a945557c4ddbd0b65757214f9 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sat, 3 Oct 2026 01:07:09 +0800
+Subject: [PATCH 23/33] =?UTF-8?q?opt15-P30:=20f2fs=20=E4=BF=AE=20dic=20?=
+ =?UTF-8?q?=E5=9C=A8=20workqueue=20=E6=99=9A=E9=87=8A=E6=94=BE=E8=B7=AF?=
+ =?UTF-8?q?=E5=BE=84=E4=B8=8A=E7=9A=84=20UAF?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+## 问题
+f2fs_free_dic() 会解引用 dic->inode 查询压缩 layout:
+
+    if (f2fs_compress_layout(dic->inode) == COMPRESS_FIXED_INPUT)
+            f2fs_release_decomp_mem(dic, bypass_destroy_callback, true);
+
+而 f2fs_free_dic() 会被 f2fs_late_free_dic()（workqueue）调用:
+
+    static void f2fs_late_free_dic(struct work_struct *work)
+    {
+            struct decompress_io_ctx *dic =
+                    container_of(work, struct decompress_io_ctx, free_work);
+            f2fs_free_dic(dic, false);
+    }
+
+f2fs_compress_layout() 是 fs/f2fs/f2fs.h 的 static inline, 在
+CONFIG_F2FS_FS_COMPRESSION_FIXED_OUTPUT=y（本树确实开着）时会真的读
+F2FS_I(inode)->i_compress_flag 和 F2FS_I_SB(inode)。
+而 dic 上没有任何 igrab/ihold 持有 inode => 晚释放路径上的 use-after-free 风险。
+
+## 为什么只改这一处
+struct decompress_io_ctx 里【已经缓存】了 sbi 和 compress_algorithm
+（上游补丁 74cbeeca4f16 做的一半, 我们 P28 已落地），唯独 layout 没缓存。
+本树共有 4 处 f2fs_compress_layout(dic->inode), 但只有这一处
+（后面紧跟 f2fs_release_decomp_mem 的那处）在晚释放路径上:
+  340   f2fs_decompress_cluster   任务上下文  => 不动
+  1376  f2fs_decompress_pages     任务上下文  => 不动
+  2315  f2fs_alloc_dic            任务上下文  => 不动（且改了会在赋值前引用缓存）
+  2474  f2fs_free_dic             workqueue   => ★只改这一处
+
+## 改动（3 处, 成套）
+1. fs/f2fs/f2fs.h —— struct decompress_io_ctx 加字段:
+       unsigned char dic_layout;   /* cached compress layout, safe on late-free path */
+   （注意: f2fs.h:231 已有一个【同名但属于 f2fs_mount_info】的 compress_layout,
+     被 CONFIG_F2FS_FS_COMPRESSION_FIXED_OUTPUT 包着, 是挂载选项, 与 dic 无关 —— 别混）
+2. fs/f2fs/compress.c f2fs_alloc_dic() —— 在任务上下文提前缓存:
+       dic->dic_layout = f2fs_compress_layout(cc->inode);
+3. fs/f2fs/compress.c f2fs_free_dic() —— 改用缓存值:
+       if (dic->dic_layout == COMPRESS_FIXED_INPUT)
+
+## CRC 安全性（已查证）
+- fs/f2fs/compress.c 没有任何 EXPORT_SYMBOL
+- f2fs_compress_layout() 是 static inline
+- struct decompress_io_ctx 不在任何导出原型里
+=> 零 CRC 影响
+
+## 验证
+  make rc=0 错误=0
+  闸门1 导出集合 PASS(新增=50 消失=1 | 命中厂商 新增=0 消失=0)
+  闸门2 厂商 CRC 真值: 会拒载模块 = 1 (仅 system_dlkm/bluetooth.ko 的 sk_filter_trim_cap)
+  横幅 #57-ack303-p30
+---
+ fs/f2fs/compress.c | 3 ++-
+ fs/f2fs/f2fs.h     | 1 +
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/fs/f2fs/compress.c b/fs/f2fs/compress.c
+index efc3843e222f..227cc352bede 100755
+--- a/fs/f2fs/compress.c
++++ b/fs/f2fs/compress.c
+@@ -2300,6 +2300,7 @@ struct decompress_io_ctx *f2fs_alloc_dic(struct compress_ctx *cc)
+ 	dic->inode = cc->inode;
+ 	dic->sbi = sbi;
+ 	dic->compress_algorithm = F2FS_I(cc->inode)->i_compress_algorithm;
++	dic->dic_layout = f2fs_compress_layout(cc->inode);
+ 	dic->cluster_idx = cc->cluster_idx;
+ 	dic->cluster_size = cc->cluster_size;
+ 	dic->log_cluster_size = cc->log_cluster_size;
+@@ -2471,7 +2472,7 @@ static void f2fs_free_dic(struct decompress_io_ctx *dic,
+ {
+ 	int i;
+ 
+-	if (f2fs_compress_layout(dic->inode) == COMPRESS_FIXED_INPUT)
++	if (dic->dic_layout == COMPRESS_FIXED_INPUT)
+ 		f2fs_release_decomp_mem(dic, bypass_destroy_callback, true);
+ 
+ 	for (i = 0; i < dic->cluster_size; i++) {
+diff --git a/fs/f2fs/f2fs.h b/fs/f2fs/f2fs.h
+index 24b0e6829f04..718a1d7b8f0c 100644
+--- a/fs/f2fs/f2fs.h
++++ b/fs/f2fs/f2fs.h
+@@ -1797,6 +1797,7 @@ struct decompress_io_ctx {
+ 	bool failed;			/* IO error occurred before decompression? */
+ 	bool need_verity;		/* need fs-verity verification after decompression? */
+ 	unsigned char compress_algorithm;	/* backup algorithm type */
++	unsigned char dic_layout;		/* cached compress layout, safe on late-free path */
+ 	void *private;			/* payload buffer for specified decompression algorithm */
+ 	void *private2;			/* extra payload buffer */
+ 	struct work_struct verity_work;	/* work to verify the decompressed pages */

@@ -1,0 +1,55 @@
+From d8e827ea8f42b6fd85ed2ca83a07732b052435d1 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 20:47:32 +0800
+Subject: [PATCH 18/33] =?UTF-8?q?opt15-P20:=20=E8=A1=A5=E4=B8=8A=20945be0a?=
+ =?UTF-8?q?f8244=20posix-cpu-timers=20UAF=20=E4=BF=AE=E5=A4=8D=E7=9A=84?=
+ =?UTF-8?q?=E3=80=90=E7=94=9F=E4=BA=A7=E8=80=85=E5=8D=8A=E8=BE=B9=E3=80=91?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+发现(不是"我误撤", 是厂商树本身就只 backport 了 2/3):
+  945be0af8244 "UPSTREAM: posix-cpu-timers: Prevent UAF caused by
+  non-leader exec() race" 是一个内存序修复, 由三处配套:
+    kernel/signal.c            消费者 smp_acquire__after_ctrl_dep()  ✅ 已在树里(厂商已backport)
+    kernel/time/posix-cpu-timers.c  锁 task->sighand 的那段          ✅ 已在树里(厂商已backport)
+    kernel/exit.c              生产者 smp_store_release(&tsk->sighand, NULL)  ❌ 缺失
+  我们树 exit.c:208 仍是裸的 `tsk->sighand = NULL;`
+  ⇒ 消费者在等生产者的 release, 缺了就没有配对的 release/acquire,
+    ARM(弱内存序) 上存在真实的 UAF 窗口。
+
+为什么之前整提交打不上:
+  signal.c / posix-cpu-timers.c 那两半已经在树里, 整提交应用会重复添加 ⇒ git apply 失败。
+  只抽 exit.c 那一个 hunk 即可干净应用(内容自检 6 条 + 行全部命中)。
+
+影响面: __exit_signal() 给 tsk->sighand 置 NULL 的那条路径, 影响非组长线程 exec 竞态下
+lock_task_sighand() 读到的 sighand 指针。这是唯一一处改动(1 文件 +7/-1)。
+
+验证:
+  make rc=0
+  闸门1 导出集合 PASS(新增=38 消失=0 命中厂商 0/0)
+  闸门2 厂商 CRC 真值: 会拒载模块 = 1 (仅 bluetooth.ko, 基线就不符)
+  三半配套自检: exit.c=1 / signal.c=1 / posix-cpu-timers.c=1
+---
+ kernel/exit.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 7dded98548e8..c79c6ee1ee1a 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -205,7 +205,13 @@ static void __exit_signal(struct task_struct *tsk)
+ 	 * doing sigqueue_free() if we have SIGQUEUE_PREALLOC signals.
+ 	 */
+ 	flush_sigqueue(&tsk->pending);
+-	tsk->sighand = NULL;
++
++	/*
++	 * Ensure that all preceeding state is visible. Pairs with
++	 * the smp_acquire__after_ctrl_dep() in the sighand == NULL
++	 * path of lock_task_sighand().
++	 */
++	smp_store_release(&tsk->sighand, NULL);
+ 	spin_unlock(&sighand->siglock);
+ 
+ 	__cleanup_sighand(sighand);

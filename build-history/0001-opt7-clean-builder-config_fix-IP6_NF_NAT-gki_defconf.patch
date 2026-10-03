@@ -1,0 +1,432 @@
+From d56788d59a1f9246694f4302e9486f197e79eff0 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:42:17 +0800
+Subject: [PATCH 01/33] =?UTF-8?q?opt7-clean:=20=E6=8B=86=E9=99=A4=20builde?=
+ =?UTF-8?q?r=20=E6=B3=A8=E5=85=A5=E7=9A=84=20config=5Ffix(=E4=B8=8D?=
+ =?UTF-8?q?=E5=86=8D=E8=B0=8E=E6=8A=A5=20IP6=5FNF=5FNAT)=20+=20gki=5Fdefco?=
+ =?UTF-8?q?nfig=20=E5=8E=BB=E9=87=8D=20+=20HEADERS=5FINSTALL=20=E5=AF=B9?=
+ =?UTF-8?q?=E9=BD=90=E5=8E=9F=E5=8E=82?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ arch/arm64/configs/gki_defconfig   | 35 +------------------
+ config.patch.1                     | 32 -----------------
+ config.patch.2                     | 32 -----------------
+ config.patch.3                     | 32 -----------------
+ cve-2026-43499-rtmutex-6.1.patch.1 | 56 ------------------------------
+ cve-2026-43499-rtmutex-6.1.patch.2 | 56 ------------------------------
+ cve-2026-43499-rtmutex-6.1.patch.3 | 56 ------------------------------
+ kernel/Makefile                    | 19 ----------
+ scripts/setlocalversion            |  2 +-
+ 9 files changed, 2 insertions(+), 318 deletions(-)
+ delete mode 100644 config.patch.1
+ delete mode 100644 config.patch.2
+ delete mode 100644 config.patch.3
+ delete mode 100644 cve-2026-43499-rtmutex-6.1.patch.1
+ delete mode 100644 cve-2026-43499-rtmutex-6.1.patch.2
+ delete mode 100644 cve-2026-43499-rtmutex-6.1.patch.3
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 35b4a8446ba3..9cf62576a209 100755
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -743,7 +743,7 @@ CONFIG_DYNAMIC_DEBUG_CORE=y
+ CONFIG_DEBUG_INFO_DWARF4=y
+ CONFIG_DEBUG_INFO_BTF=y
+ CONFIG_MODULE_ALLOW_BTF_MISMATCH=y
+-CONFIG_HEADERS_INSTALL=y
++# CONFIG_HEADERS_INSTALL is not set
+ # CONFIG_SECTION_MISMATCH_WARN_ONLY is not set
+ CONFIG_MAGIC_SYSRQ=y
+ CONFIG_UBSAN=y
+@@ -786,8 +786,6 @@ CONFIG_TCP_CONG_WESTWOOD=y
+ CONFIG_TCP_CONG_HTCP=y
+ CONFIG_TCP_CONG_NV=y
+ # [opt1] 网络: 出网队列调度器(治"满速下载时其他应用卡")
+-CONFIG_NET_SCH_FQ=y
+-CONFIG_NET_SCH_FQ_CODEL=y
+ CONFIG_NET_SCH_CAKE=y
+ # [opt2] 网络默认值: 烙进内核, 不需要任何脚本
+ CONFIG_DEFAULT_BBR=y
+@@ -802,37 +800,6 @@ CONFIG_KSU_SUSFS=n
+ CONFIG_TMPFS_XATTR=y
+ CONFIG_TMPFS_POSIX_ACL=y
+ CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
+-CONFIG_HEADERS_INSTALL=n
+-CONFIG_BPF_STREAM_PARSER=y
+-CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+-CONFIG_NETFILTER_XT_SET=y
+-CONFIG_IP_SET=y
+-CONFIG_IP_SET_MAX=65534
+-CONFIG_IP_SET_BITMAP_IP=y
+-CONFIG_IP_SET_BITMAP_IPMAC=y
+-CONFIG_IP_SET_BITMAP_PORT=y
+-CONFIG_IP_SET_HASH_IP=y
+-CONFIG_IP_SET_HASH_IPMARK=y
+-CONFIG_IP_SET_HASH_IPPORT=y
+-CONFIG_IP_SET_HASH_IPPORTIP=y
+-CONFIG_IP_SET_HASH_IPPORTNET=y
+-CONFIG_IP_SET_HASH_IPMAC=y
+-CONFIG_IP_SET_HASH_MAC=y
+-CONFIG_IP_SET_HASH_NETPORTNET=y
+-CONFIG_IP_SET_HASH_NET=y
+-CONFIG_IP_SET_HASH_NETNET=y
+-CONFIG_IP_SET_HASH_NETPORT=y
+-CONFIG_IP_SET_HASH_NETIFACE=y
+-CONFIG_IP_SET_LIST_SET=y
+-CONFIG_IP6_NF_NAT=y
+-CONFIG_IP6_NF_TARGET_MASQUERADE=y
+-CONFIG_BBG=y
+-# CONFIG_KSU is not set
+-CONFIG_KSU_SUSFS=n
+-CONFIG_TMPFS_XATTR=y
+-CONFIG_TMPFS_POSIX_ACL=y
+-CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
+-CONFIG_HEADERS_INSTALL=n
+ CONFIG_BPF_STREAM_PARSER=y
+ CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+ CONFIG_NETFILTER_XT_SET=y
+diff --git a/config.patch.1 b/config.patch.1
+deleted file mode 100644
+index 20f8e8996948..000000000000
+--- a/config.patch.1
++++ /dev/null
+@@ -1,32 +0,0 @@
+-diff --git a/kernel/Makefile b/kernel/Makefile
+-index df02908..f654c9b 100644
+---- a/kernel/Makefile
+-+++ b/kernel/Makefile
+-@@ -154,8 +154,27 @@ $(obj)/config_data.gz: $(obj)/config_data FORCE
+- 
+- filechk_cat = cat $<
+- 
+-+define config_fix
+-+	echo "kernel: Checking config_data for CONFIG_IP6_NF_NAT..."; \
+-+	if grep -q '^CONFIG_IP6_NF_NAT=y' $@; then \
+-+		echo "kernel: Found CONFIG_IP6_NF_NAT=y - modifying to display as 'n'"; \
+-+		sed -i 's/^CONFIG_IP6_NF_NAT=y$$/CONFIG_IP6_NF_NAT=n/' $@; \
+-+		echo "kernel: Successfully modified CONFIG_IP6_NF_NAT display in config_data"; \
+-+	elif grep -q '^CONFIG_IP6_NF_NAT=n' $@; then \
+-+		echo "kernel: CONFIG_IP6_NF_NAT already set to 'n' (no change needed)"; \
+-+	elif grep -q 'CONFIG_IP6_NF_NAT' $@; then \
+-+		echo "kernel: Warning: Unexpected CONFIG_IP6_NF_NAT value found"; \
+-+		grep 'CONFIG_IP6_NF_NAT' $@; \
+-+	else \
+-+		echo "kernel: Warning: CONFIG_IP6_NF_NAT not found in config_data"; \
+-+	fi; \
+-+	echo "kernel: Final CONFIG_IP6_NF_NAT value in config_data: "; \
+-+	grep 'CONFIG_IP6_NF_NAT' $@ || echo "kernel: (not present)"
+-+endef
+-+
+- $(obj)/config_data: $(KCONFIG_CONFIG) FORCE
+- 	$(call filechk,cat)
+-+	$(Q)$(config_fix)
+- 
+- $(obj)/kheaders.o: $(obj)/kheaders_data.tar.xz
+- 
+diff --git a/config.patch.2 b/config.patch.2
+deleted file mode 100644
+index 20f8e8996948..000000000000
+--- a/config.patch.2
++++ /dev/null
+@@ -1,32 +0,0 @@
+-diff --git a/kernel/Makefile b/kernel/Makefile
+-index df02908..f654c9b 100644
+---- a/kernel/Makefile
+-+++ b/kernel/Makefile
+-@@ -154,8 +154,27 @@ $(obj)/config_data.gz: $(obj)/config_data FORCE
+- 
+- filechk_cat = cat $<
+- 
+-+define config_fix
+-+	echo "kernel: Checking config_data for CONFIG_IP6_NF_NAT..."; \
+-+	if grep -q '^CONFIG_IP6_NF_NAT=y' $@; then \
+-+		echo "kernel: Found CONFIG_IP6_NF_NAT=y - modifying to display as 'n'"; \
+-+		sed -i 's/^CONFIG_IP6_NF_NAT=y$$/CONFIG_IP6_NF_NAT=n/' $@; \
+-+		echo "kernel: Successfully modified CONFIG_IP6_NF_NAT display in config_data"; \
+-+	elif grep -q '^CONFIG_IP6_NF_NAT=n' $@; then \
+-+		echo "kernel: CONFIG_IP6_NF_NAT already set to 'n' (no change needed)"; \
+-+	elif grep -q 'CONFIG_IP6_NF_NAT' $@; then \
+-+		echo "kernel: Warning: Unexpected CONFIG_IP6_NF_NAT value found"; \
+-+		grep 'CONFIG_IP6_NF_NAT' $@; \
+-+	else \
+-+		echo "kernel: Warning: CONFIG_IP6_NF_NAT not found in config_data"; \
+-+	fi; \
+-+	echo "kernel: Final CONFIG_IP6_NF_NAT value in config_data: "; \
+-+	grep 'CONFIG_IP6_NF_NAT' $@ || echo "kernel: (not present)"
+-+endef
+-+
+- $(obj)/config_data: $(KCONFIG_CONFIG) FORCE
+- 	$(call filechk,cat)
+-+	$(Q)$(config_fix)
+- 
+- $(obj)/kheaders.o: $(obj)/kheaders_data.tar.xz
+- 
+diff --git a/config.patch.3 b/config.patch.3
+deleted file mode 100644
+index 20f8e8996948..000000000000
+--- a/config.patch.3
++++ /dev/null
+@@ -1,32 +0,0 @@
+-diff --git a/kernel/Makefile b/kernel/Makefile
+-index df02908..f654c9b 100644
+---- a/kernel/Makefile
+-+++ b/kernel/Makefile
+-@@ -154,8 +154,27 @@ $(obj)/config_data.gz: $(obj)/config_data FORCE
+- 
+- filechk_cat = cat $<
+- 
+-+define config_fix
+-+	echo "kernel: Checking config_data for CONFIG_IP6_NF_NAT..."; \
+-+	if grep -q '^CONFIG_IP6_NF_NAT=y' $@; then \
+-+		echo "kernel: Found CONFIG_IP6_NF_NAT=y - modifying to display as 'n'"; \
+-+		sed -i 's/^CONFIG_IP6_NF_NAT=y$$/CONFIG_IP6_NF_NAT=n/' $@; \
+-+		echo "kernel: Successfully modified CONFIG_IP6_NF_NAT display in config_data"; \
+-+	elif grep -q '^CONFIG_IP6_NF_NAT=n' $@; then \
+-+		echo "kernel: CONFIG_IP6_NF_NAT already set to 'n' (no change needed)"; \
+-+	elif grep -q 'CONFIG_IP6_NF_NAT' $@; then \
+-+		echo "kernel: Warning: Unexpected CONFIG_IP6_NF_NAT value found"; \
+-+		grep 'CONFIG_IP6_NF_NAT' $@; \
+-+	else \
+-+		echo "kernel: Warning: CONFIG_IP6_NF_NAT not found in config_data"; \
+-+	fi; \
+-+	echo "kernel: Final CONFIG_IP6_NF_NAT value in config_data: "; \
+-+	grep 'CONFIG_IP6_NF_NAT' $@ || echo "kernel: (not present)"
+-+endef
+-+
+- $(obj)/config_data: $(KCONFIG_CONFIG) FORCE
+- 	$(call filechk,cat)
+-+	$(Q)$(config_fix)
+- 
+- $(obj)/kheaders.o: $(obj)/kheaders_data.tar.xz
+- 
+diff --git a/cve-2026-43499-rtmutex-6.1.patch.1 b/cve-2026-43499-rtmutex-6.1.patch.1
+deleted file mode 100644
+index f346011a32dd..000000000000
+--- a/cve-2026-43499-rtmutex-6.1.patch.1
++++ /dev/null
+@@ -1,56 +0,0 @@
+-diff --git a/kernel/locking/rtmutex.c b/kernel/locking/rtmutex.c
+-index bf3a28ee7..def1f8fbc 100644
+---- a/kernel/locking/rtmutex.c
+-+++ b/kernel/locking/rtmutex.c
+-@@ -1511,20 +1511,26 @@ static bool rtmutex_spin_on_owner(struct rt_mutex_base *lock,
+-  *
+-  * Must be called with lock->wait_lock held and interrupts disabled. It must
+-  * have just failed to try_to_take_rt_mutex().
+-+ *
+-+ * When invoked from rt_mutex_start_proxy_lock() waiter::task != current !
+-  */
+- static void __sched remove_waiter(struct rt_mutex_base *lock,
+- 				  struct rt_mutex_waiter *waiter)
+- {
+- 	bool is_top_waiter = (waiter == rt_mutex_top_waiter(lock));
+- 	struct task_struct *owner = rt_mutex_owner(lock);
+-+	struct task_struct *waiter_task = waiter->task;
+- 	struct rt_mutex_base *next_lock;
+- 
+- 	lockdep_assert_held(&lock->wait_lock);
+- 
+-+	if (!waiter_task) /* never enqueued */
+-+		return;
+-+
+--	raw_spin_lock(&current->pi_lock);
+--	rt_mutex_dequeue(lock, waiter);
+--	current->pi_blocked_on = NULL;
+--	raw_spin_unlock(&current->pi_lock);
+-+	scoped_guard(raw_spinlock, &waiter_task->pi_lock) {
+-+		rt_mutex_dequeue(lock, waiter);
+-+		waiter_task->pi_blocked_on = NULL;
+-+	}
+- 
+- 	/*
+- 	 * Only update priority if the waiter was the highest priority
+-@@ -1560,7 +1566,7 @@ static void __sched remove_waiter(struct rt_mutex_base *lock,
+- 	raw_spin_unlock_irq(&lock->wait_lock);
+- 
+- 	rt_mutex_adjust_prio_chain(owner, RT_MUTEX_MIN_CHAINWALK, lock,
+--				   next_lock, NULL, current);
+-+				   next_lock, NULL, waiter_task);
+- 
+- 	raw_spin_lock_irq(&lock->wait_lock);
+- }
+-diff --git a/kernel/locking/rtmutex_api.c b/kernel/locking/rtmutex_api.c
+---- a/kernel/locking/rtmutex_api.c
+-+++ b/kernel/locking/rtmutex_api.c
+-@@ -354,7 +354,7 @@ int __sched rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
+- 
+- 	raw_spin_lock_irq(&lock->wait_lock);
+- 	ret = __rt_mutex_start_proxy_lock(lock, waiter, task);
+--	if (unlikely(ret))
+-+	if (unlikely(ret < 0))
+- 		remove_waiter(lock, waiter);
+- 	raw_spin_unlock_irq(&lock->wait_lock);
+- 
+diff --git a/cve-2026-43499-rtmutex-6.1.patch.2 b/cve-2026-43499-rtmutex-6.1.patch.2
+deleted file mode 100644
+index f346011a32dd..000000000000
+--- a/cve-2026-43499-rtmutex-6.1.patch.2
++++ /dev/null
+@@ -1,56 +0,0 @@
+-diff --git a/kernel/locking/rtmutex.c b/kernel/locking/rtmutex.c
+-index bf3a28ee7..def1f8fbc 100644
+---- a/kernel/locking/rtmutex.c
+-+++ b/kernel/locking/rtmutex.c
+-@@ -1511,20 +1511,26 @@ static bool rtmutex_spin_on_owner(struct rt_mutex_base *lock,
+-  *
+-  * Must be called with lock->wait_lock held and interrupts disabled. It must
+-  * have just failed to try_to_take_rt_mutex().
+-+ *
+-+ * When invoked from rt_mutex_start_proxy_lock() waiter::task != current !
+-  */
+- static void __sched remove_waiter(struct rt_mutex_base *lock,
+- 				  struct rt_mutex_waiter *waiter)
+- {
+- 	bool is_top_waiter = (waiter == rt_mutex_top_waiter(lock));
+- 	struct task_struct *owner = rt_mutex_owner(lock);
+-+	struct task_struct *waiter_task = waiter->task;
+- 	struct rt_mutex_base *next_lock;
+- 
+- 	lockdep_assert_held(&lock->wait_lock);
+- 
+-+	if (!waiter_task) /* never enqueued */
+-+		return;
+-+
+--	raw_spin_lock(&current->pi_lock);
+--	rt_mutex_dequeue(lock, waiter);
+--	current->pi_blocked_on = NULL;
+--	raw_spin_unlock(&current->pi_lock);
+-+	scoped_guard(raw_spinlock, &waiter_task->pi_lock) {
+-+		rt_mutex_dequeue(lock, waiter);
+-+		waiter_task->pi_blocked_on = NULL;
+-+	}
+- 
+- 	/*
+- 	 * Only update priority if the waiter was the highest priority
+-@@ -1560,7 +1566,7 @@ static void __sched remove_waiter(struct rt_mutex_base *lock,
+- 	raw_spin_unlock_irq(&lock->wait_lock);
+- 
+- 	rt_mutex_adjust_prio_chain(owner, RT_MUTEX_MIN_CHAINWALK, lock,
+--				   next_lock, NULL, current);
+-+				   next_lock, NULL, waiter_task);
+- 
+- 	raw_spin_lock_irq(&lock->wait_lock);
+- }
+-diff --git a/kernel/locking/rtmutex_api.c b/kernel/locking/rtmutex_api.c
+---- a/kernel/locking/rtmutex_api.c
+-+++ b/kernel/locking/rtmutex_api.c
+-@@ -354,7 +354,7 @@ int __sched rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
+- 
+- 	raw_spin_lock_irq(&lock->wait_lock);
+- 	ret = __rt_mutex_start_proxy_lock(lock, waiter, task);
+--	if (unlikely(ret))
+-+	if (unlikely(ret < 0))
+- 		remove_waiter(lock, waiter);
+- 	raw_spin_unlock_irq(&lock->wait_lock);
+- 
+diff --git a/cve-2026-43499-rtmutex-6.1.patch.3 b/cve-2026-43499-rtmutex-6.1.patch.3
+deleted file mode 100644
+index f346011a32dd..000000000000
+--- a/cve-2026-43499-rtmutex-6.1.patch.3
++++ /dev/null
+@@ -1,56 +0,0 @@
+-diff --git a/kernel/locking/rtmutex.c b/kernel/locking/rtmutex.c
+-index bf3a28ee7..def1f8fbc 100644
+---- a/kernel/locking/rtmutex.c
+-+++ b/kernel/locking/rtmutex.c
+-@@ -1511,20 +1511,26 @@ static bool rtmutex_spin_on_owner(struct rt_mutex_base *lock,
+-  *
+-  * Must be called with lock->wait_lock held and interrupts disabled. It must
+-  * have just failed to try_to_take_rt_mutex().
+-+ *
+-+ * When invoked from rt_mutex_start_proxy_lock() waiter::task != current !
+-  */
+- static void __sched remove_waiter(struct rt_mutex_base *lock,
+- 				  struct rt_mutex_waiter *waiter)
+- {
+- 	bool is_top_waiter = (waiter == rt_mutex_top_waiter(lock));
+- 	struct task_struct *owner = rt_mutex_owner(lock);
+-+	struct task_struct *waiter_task = waiter->task;
+- 	struct rt_mutex_base *next_lock;
+- 
+- 	lockdep_assert_held(&lock->wait_lock);
+- 
+-+	if (!waiter_task) /* never enqueued */
+-+		return;
+-+
+--	raw_spin_lock(&current->pi_lock);
+--	rt_mutex_dequeue(lock, waiter);
+--	current->pi_blocked_on = NULL;
+--	raw_spin_unlock(&current->pi_lock);
+-+	scoped_guard(raw_spinlock, &waiter_task->pi_lock) {
+-+		rt_mutex_dequeue(lock, waiter);
+-+		waiter_task->pi_blocked_on = NULL;
+-+	}
+- 
+- 	/*
+- 	 * Only update priority if the waiter was the highest priority
+-@@ -1560,7 +1566,7 @@ static void __sched remove_waiter(struct rt_mutex_base *lock,
+- 	raw_spin_unlock_irq(&lock->wait_lock);
+- 
+- 	rt_mutex_adjust_prio_chain(owner, RT_MUTEX_MIN_CHAINWALK, lock,
+--				   next_lock, NULL, current);
+-+				   next_lock, NULL, waiter_task);
+- 
+- 	raw_spin_lock_irq(&lock->wait_lock);
+- }
+-diff --git a/kernel/locking/rtmutex_api.c b/kernel/locking/rtmutex_api.c
+---- a/kernel/locking/rtmutex_api.c
+-+++ b/kernel/locking/rtmutex_api.c
+-@@ -354,7 +354,7 @@ int __sched rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
+- 
+- 	raw_spin_lock_irq(&lock->wait_lock);
+- 	ret = __rt_mutex_start_proxy_lock(lock, waiter, task);
+--	if (unlikely(ret))
+-+	if (unlikely(ret < 0))
+- 		remove_waiter(lock, waiter);
+- 	raw_spin_unlock_irq(&lock->wait_lock);
+- 
+diff --git a/kernel/Makefile b/kernel/Makefile
+index b03940c9432e..d070a315019e 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -158,27 +158,8 @@ $(obj)/config_data.gz: $(obj)/config_data FORCE
+ 
+ filechk_cat = cat $<
+ 
+-define config_fix
+-	echo "kernel: Checking config_data for CONFIG_IP6_NF_NAT..."; \
+-	if grep -q '^CONFIG_IP6_NF_NAT=y' $@; then \
+-		echo "kernel: Found CONFIG_IP6_NF_NAT=y - modifying to display as 'n'"; \
+-		sed -i 's/^CONFIG_IP6_NF_NAT=y$$/CONFIG_IP6_NF_NAT=n/' $@; \
+-		echo "kernel: Successfully modified CONFIG_IP6_NF_NAT display in config_data"; \
+-	elif grep -q '^CONFIG_IP6_NF_NAT=n' $@; then \
+-		echo "kernel: CONFIG_IP6_NF_NAT already set to 'n' (no change needed)"; \
+-	elif grep -q 'CONFIG_IP6_NF_NAT' $@; then \
+-		echo "kernel: Warning: Unexpected CONFIG_IP6_NF_NAT value found"; \
+-		grep 'CONFIG_IP6_NF_NAT' $@; \
+-	else \
+-		echo "kernel: Warning: CONFIG_IP6_NF_NAT not found in config_data"; \
+-	fi; \
+-	echo "kernel: Final CONFIG_IP6_NF_NAT value in config_data: "; \
+-	grep 'CONFIG_IP6_NF_NAT' $@ || echo "kernel: (not present)"
+-endef
+-
+ $(obj)/config_data: $(KCONFIG_CONFIG) FORCE
+ 	$(call filechk,cat)
+-	$(Q)$(config_fix)
+ 
+ $(obj)/kheaders.o: $(obj)/kheaders_data.tar.xz
+ 
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 5a8956d603e0..7da8480f01b7 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5"
++echo "-android14-11-o-ltcdz5-clean"

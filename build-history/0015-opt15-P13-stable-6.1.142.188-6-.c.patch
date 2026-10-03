@@ -1,0 +1,298 @@
+From d4fe9dd3640e5681cd66dcb9994795257039e861 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 16:50:22 +0800
+Subject: [PATCH 15/33] =?UTF-8?q?opt15-P13:=20=E8=A1=A5=E4=B8=8A=20stable?=
+ =?UTF-8?q?=206.1.142..188=20=E4=B8=AD=E6=9C=AC=E6=9C=BA=E5=8F=82=E4=B8=8E?=
+ =?UTF-8?q?=E7=BC=96=E8=AF=91=E5=8D=B4=E8=A2=AB=E8=B7=B3=E8=BF=87=E7=9A=84?=
+ =?UTF-8?q?=206=20=E6=9D=A1=E7=BA=AF=20.c?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+背景(本轮审计发现):
+  对 stable 6.1.142..188 做逐文件完整性审计(判据=本机真参与编译的 3915 个文件):
+    已有(能反向打) = 24
+    缺失(能正向打) = 471  <- 其中 纯 .c 只有 9, .h 有 462
+  当年 opt10/11/12 的收割「只挑纯 .c」是刻意的 —— 改头文件会引发 modversions
+  CRC 漂移, 进而让厂商 .ko 全部拒载(opt15 那次翻车的根因)。
+  但这也意味着: 依赖头文件改动的那些 .c 被一并跳过了。
+
+本提交补上的 6 条 (全部零 CRC 风险, 能独立编译):
+  6.1.142 sound/usb/mixer_maps.c
+  6.1.147 kernel/sched/loadavg.c
+  6.1.151 kernel/sched/cpufreq_schedutil.c
+  6.1.157 kernel/sched/deadline.c
+  6.1.176 kernel/sched/rt.c
+  6.1.188 kernel/sched/cpufreq_schedutil.c
+
+主动放弃的 3 条 (需要动导出类型头, CRC 风险不可接受):
+  fs/binfmt_elf.c            需 include/linux/fs.h 的 exe_file_allow_write_access
+  sound/core/control_compat.c 需 include/sound/control.h 的 snd_ctl_find_id_locked
+  kernel/sched/topology.c    需 struct sched_domain 的 newidle_* 字段
+                             (试过补 kernel/sched/sched.h, 但字段定义在别处, 已撤销)
+
+验证:
+  make rc=0; 闸门1 导出集合 PASS(新增=22 消失=0 命中厂商 0/0)
+  闸门2 厂商 CRC 真值: 仅 bluetooth.ko(基线就不符, 与 opt14/15/P5/P11 一致)
+---
+ kernel/sched/cpufreq_schedutil.c | 45 +++++++++++++++++---
+ kernel/sched/deadline.c          | 73 +++++++++++++++++++++-----------
+ kernel/sched/loadavg.c           |  2 +-
+ kernel/sched/rt.c                |  2 +-
+ sound/usb/mixer_maps.c           | 12 ++++++
+ 5 files changed, 101 insertions(+), 33 deletions(-)
+
+diff --git a/kernel/sched/cpufreq_schedutil.c b/kernel/sched/cpufreq_schedutil.c
+index 7f1f71c2486d..130ccccbb0c9 100644
+--- a/kernel/sched/cpufreq_schedutil.c
++++ b/kernel/sched/cpufreq_schedutil.c
+@@ -62,6 +62,17 @@ static DEFINE_PER_CPU(struct sugov_cpu, sugov_cpu);
+ 
+ /************************ Governor internals ***********************/
+ 
++static void sugov_update_rate_limit_us(struct sugov_policy *sg_policy)
++{
++	/*
++	 * Cast rate_limit_us before multiplication to force 64-bit arithmetic.
++	 * Otherwise, on 32-bit platforms, both operands are converted to
++	 * 32-bit unsigned long and the multiplication may overflow.
++	 */
++	sg_policy->freq_update_delay_ns =
++		(s64)sg_policy->tunables->rate_limit_us * NSEC_PER_USEC;
++}
++
+ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
+ {
+ 	s64 delta_ns;
+@@ -84,9 +95,20 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
+ 	if (!cpufreq_this_cpu_can_update(sg_policy->policy))
+ 		return false;
+ 
+-	if (unlikely(sg_policy->limits_changed)) {
+-		sg_policy->limits_changed = false;
++	if (unlikely(READ_ONCE(sg_policy->limits_changed))) {
++		WRITE_ONCE(sg_policy->limits_changed, false);
+ 		sg_policy->need_freq_update = true;
++
++		/*
++		 * The above limits_changed update must occur before the reads
++		 * of policy limits in cpufreq_driver_resolve_freq() or a policy
++		 * limits update might be missed, so use a memory barrier to
++		 * ensure it.
++		 *
++		 * This pairs with the write memory barrier in sugov_limits().
++		 */
++		smp_mb();
++
+ 		return true;
+ 	}
+ 
+@@ -262,7 +284,7 @@ static void sugov_iowait_boost(struct sugov_cpu *sg_cpu, u64 time,
+  * A CPU running a task which woken up after an IO operation can have its
+  * utilization boosted to speed up the completion of those IO operations.
+  * The IO boost value is increased each time a task wakes up from IO, in
+- * sugov_iowait_apply(), and it's instead decreased by this function,
++ * sugov_iowait_boost(), and it's instead decreased by this function,
+  * each time an increase has not been requested (!iowait_boost_pending).
+  *
+  * A CPU which also appears to have been idle for at least one tick has also
+@@ -326,7 +348,7 @@ static inline bool sugov_cpu_is_busy(struct sugov_cpu *sg_cpu) { return false; }
+ static inline void ignore_dl_rate_limit(struct sugov_cpu *sg_cpu)
+ {
+ 	if (cpu_bw_dl(cpu_rq(sg_cpu->cpu)) > sg_cpu->bw_dl)
+-		sg_cpu->sg_policy->limits_changed = true;
++		WRITE_ONCE(sg_cpu->sg_policy->limits_changed, true);
+ }
+ 
+ static inline bool sugov_update_single_common(struct sugov_cpu *sg_cpu,
+@@ -544,7 +566,7 @@ rate_limit_us_store(struct gov_attr_set *attr_set, const char *buf, size_t count
+ 	tunables->rate_limit_us = rate_limit_us;
+ 
+ 	list_for_each_entry(sg_policy, &attr_set->policy_list, tunables_hook)
+-		sg_policy->freq_update_delay_ns = rate_limit_us * NSEC_PER_USEC;
++		sugov_update_rate_limit_us(sg_policy);
+ 
+ 	return count;
+ }
+@@ -776,7 +798,7 @@ static int sugov_start(struct cpufreq_policy *policy)
+ 	void (*uu)(struct update_util_data *data, u64 time, unsigned int flags);
+ 	unsigned int cpu;
+ 
+-	sg_policy->freq_update_delay_ns	= sg_policy->tunables->rate_limit_us * NSEC_PER_USEC;
++	sugov_update_rate_limit_us(sg_policy);
+ 	sg_policy->last_freq_update_time	= 0;
+ 	sg_policy->next_freq			= 0;
+ 	sg_policy->work_in_progress		= false;
+@@ -834,7 +856,16 @@ static void sugov_limits(struct cpufreq_policy *policy)
+ 		mutex_unlock(&sg_policy->work_lock);
+ 	}
+ 
+-	sg_policy->limits_changed = true;
++	/*
++	 * The limits_changed update below must take place before the updates
++	 * of policy limits in cpufreq_set_policy() or a policy limits update
++	 * might be missed, so use a memory barrier to ensure it.
++	 *
++	 * This pairs with the memory barrier in sugov_should_update_freq().
++	 */
++	smp_wmb();
++
++	WRITE_ONCE(sg_policy->limits_changed, true);
+ }
+ 
+ struct cpufreq_governor schedutil_gov = {
+diff --git a/kernel/sched/deadline.c b/kernel/sched/deadline.c
+index 9a96dc488431..62a7c4ed8675 100644
+--- a/kernel/sched/deadline.c
++++ b/kernel/sched/deadline.c
+@@ -2217,6 +2217,25 @@ static int find_later_rq(struct task_struct *task)
+ 	return -1;
+ }
+ 
++static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
++{
++	struct task_struct *p;
++
++	if (!has_pushable_dl_tasks(rq))
++		return NULL;
++
++	p = __node_2_pdl(rb_first_cached(&rq->dl.pushable_dl_tasks_root));
++
++	WARN_ON_ONCE(rq->cpu != task_cpu(p));
++	WARN_ON_ONCE(task_current(rq, p));
++	WARN_ON_ONCE(p->nr_cpus_allowed <= 1);
++
++	WARN_ON_ONCE(!task_on_rq_queued(p));
++	WARN_ON_ONCE(!dl_task(p));
++
++	return p;
++}
++
+ /* Locks the rq it finds */
+ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
+ {
+@@ -2244,12 +2263,37 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
+ 
+ 		/* Retry if something changed. */
+ 		if (double_lock_balance(rq, later_rq)) {
+-			if (unlikely(task_rq(task) != rq ||
++			/*
++			 * double_lock_balance had to release rq->lock, in the
++			 * meantime, task may no longer be fit to be migrated.
++			 * Check the following to ensure that the task is
++			 * still suitable for migration:
++			 * 1. It is possible the task was scheduled,
++			 *    migrate_disabled was set and then got preempted,
++			 *    so we must check the task migration disable
++			 *    flag.
++			 * 2. The CPU picked is in the task's affinity.
++			 * 3. For throttled task (dl_task_offline_migration),
++			 *    check the following:
++			 *    - the task is not on the rq anymore (it was
++			 *      migrated)
++			 *    - the task is not on CPU anymore
++			 *    - the task is still a dl task
++			 *    - the task is not queued on the rq anymore
++			 * 4. For the non-throttled task (push_dl_task), the
++			 *    check to ensure that this task is still at the
++			 *    head of the pushable tasks list is enough.
++			 */
++			if (unlikely(is_migration_disabled(task) ||
+ 				     !cpumask_test_cpu(later_rq->cpu, &task->cpus_mask) ||
+-				     task_on_cpu(rq, task) ||
+-				     !dl_task(task) ||
+-				     is_migration_disabled(task) ||
+-				     !task_on_rq_queued(task))) {
++				     (task->dl.dl_throttled &&
++				      (task_rq(task) != rq ||
++				       task_on_cpu(rq, task) ||
++				       !dl_task(task) ||
++				       !task_on_rq_queued(task))) ||
++				     (!task->dl.dl_throttled &&
++				      task != pick_next_pushable_dl_task(rq)))) {
++
+ 				double_unlock_balance(rq, later_rq);
+ 				later_rq = NULL;
+ 				break;
+@@ -2272,25 +2316,6 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
+ 	return later_rq;
+ }
+ 
+-static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
+-{
+-	struct task_struct *p;
+-
+-	if (!has_pushable_dl_tasks(rq))
+-		return NULL;
+-
+-	p = __node_2_pdl(rb_first_cached(&rq->dl.pushable_dl_tasks_root));
+-
+-	WARN_ON_ONCE(rq->cpu != task_cpu(p));
+-	WARN_ON_ONCE(task_current(rq, p));
+-	WARN_ON_ONCE(p->nr_cpus_allowed <= 1);
+-
+-	WARN_ON_ONCE(!task_on_rq_queued(p));
+-	WARN_ON_ONCE(!dl_task(p));
+-
+-	return p;
+-}
+-
+ /*
+  * See if the non running -deadline tasks on this rq
+  * can be sent to some other CPU where they can preempt
+diff --git a/kernel/sched/loadavg.c b/kernel/sched/loadavg.c
+index 52c8f8226b0d..35537ea03fff 100644
+--- a/kernel/sched/loadavg.c
++++ b/kernel/sched/loadavg.c
+@@ -80,7 +80,7 @@ long calc_load_fold_active(struct rq *this_rq, long adjust)
+ 	long nr_active, delta = 0;
+ 
+ 	nr_active = this_rq->nr_running - adjust;
+-	nr_active += (int)this_rq->nr_uninterruptible;
++	nr_active += (long)this_rq->nr_uninterruptible;
+ 
+ 	if (nr_active != this_rq->calc_load_active) {
+ 		delta = nr_active - this_rq->calc_load_active;
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 58c22cac387f..5884fdc8a430 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -2883,7 +2883,7 @@ static int tg_rt_schedulable(struct task_group *tg, void *data)
+ {
+ 	struct rt_schedulable_data *d = data;
+ 	struct task_group *child;
+-	unsigned long total, sum = 0;
++	u64 total, sum = 0;
+ 	u64 period, runtime;
+ 
+ 	period = ktime_to_ns(tg->rt_bandwidth.rt_period);
+diff --git a/sound/usb/mixer_maps.c b/sound/usb/mixer_maps.c
+index 0e9b5431a47f..faac7df1fbcf 100644
+--- a/sound/usb/mixer_maps.c
++++ b/sound/usb/mixer_maps.c
+@@ -383,6 +383,13 @@ static const struct usbmix_name_map ms_usb_link_map[] = {
+ 	{ 0 }   /* terminator */
+ };
+ 
++/* KTMicro USB */
++static struct usbmix_name_map s31b2_0022_map[] = {
++	{ 23, "Speaker Playback" },
++	{ 18, "Headphone Playback" },
++	{ 0 }
++};
++
+ /* ASUS ROG Zenith II with Realtek ALC1220-VB */
+ static const struct usbmix_name_map asus_zenith_ii_map[] = {
+ 	{ 19, NULL, 12 }, /* FU, Input Gain Pad - broken response, disabled */
+@@ -692,6 +699,11 @@ static const struct usbmix_ctl_map usbmix_ctl_maps[] = {
+ 		.id = USB_ID(0x045e, 0x083c),
+ 		.map = ms_usb_link_map,
+ 	},
++	{
++		/* KTMicro USB */
++		.id = USB_ID(0X31b2, 0x0022),
++		.map = s31b2_0022_map,
++	},
+ 	{ 0 } /* terminator */
+ };
+ 

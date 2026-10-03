@@ -1,0 +1,4338 @@
+From 234e0260ea0c9a85a1eae059ec1d4665c38da44c Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 02:32:30 +0800
+Subject: [PATCH 12/33] =?UTF-8?q?opt15:=20ACK=20=E7=AC=AC=E4=BA=8C?=
+ =?UTF-8?q?=E6=89=B9=20138=20=E6=9D=A1(166=20=E4=B8=AD=E9=80=80=2028=20?=
+ =?UTF-8?q?=E6=9D=A1=20modversions=20CRC=20=E9=A3=8E=E9=99=A9=20+=205=20?=
+ =?UTF-8?q?=E6=9D=A1=E7=BC=BA=E5=89=8D=E7=BD=AE)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+判据与过程见 kernel-kit/modversions-CRC闸门-20261002.md 与 ACK第二批-分类与落地-20261002.md。
+- 退 28 条的判据: genksyms 的 CRC 只由声明(头文件)决定 => 凡碰过本次改动头文件的补丁全退,
+  保证厂商 .ko 的 __versions CRC 全对得上。真值闸门 gate_vko_crc.py 验证: 493 个厂商模块里
+  只剩 bluetooth.ko 拒载(与 opt14 相同的原有问题)。
+- 版本后缀 opt14 -> opt15 (scripts/setlocalversion)。
+- 导出闸门 PASS: 新增=1 消失=0, 命中厂商 0/0。
+- 刷机实测: lsmod 621 (与 opt14 一致), wlan0 UP, pstore 0。
+---
+ arch/arm64/crypto/aes-modes.S                 |   4 +-
+ crypto/Kconfig                                |   1 -
+ crypto/asymmetric_keys/asymmetric_type.c      |  14 +-
+ crypto/authenc.c                              |  32 +---
+ crypto/authencesn.c                           |  43 +----
+ crypto/scatterwalk.c                          |  94 +++++++++++
+ crypto/seqiv.c                                |   8 +-
+ drivers/scsi/hosts.c                          |   5 +-
+ drivers/scsi/scsi_error.c                     |  11 +-
+ drivers/scsi/scsi_lib.c                       |   8 +
+ drivers/scsi/scsi_scan.c                      |   1 +
+ drivers/scsi/sd.c                             |   1 +
+ drivers/ufs/core/ufshcd.c                     |  60 ++++---
+ fs/ext4/crypto.c                              |   9 +-
+ fs/ext4/extents.c                             |  24 ++-
+ fs/ext4/fast_commit.c                         |  19 ++-
+ fs/ext4/ialloc.c                              |   7 +-
+ fs/ext4/inline.c                              |  22 ++-
+ fs/ext4/inode.c                               |  28 +++-
+ fs/ext4/ioctl.c                               |   3 +
+ fs/ext4/mballoc.c                             |  52 +++---
+ fs/ext4/move_extent.c                         |   2 +-
+ fs/ext4/super.c                               | 151 +++++++++++-------
+ fs/ext4/xattr.c                               |  10 +-
+ include/crypto/scatterwalk.h                  |  31 ++++
+ kernel/bpf/btf.c                              |  24 ++-
+ kernel/bpf/cgroup.c                           |  10 +-
+ kernel/bpf/devmap.c                           |  22 ++-
+ kernel/bpf/helpers.c                          |  17 +-
+ kernel/bpf/local_storage.c                    |   2 +-
+ kernel/bpf/ringbuf.c                          |   2 +
+ kernel/bpf/trampoline.c                       |   4 +-
+ kernel/bpf/verifier.c                         |  32 ++--
+ net/bpf/test_run.c                            |  34 ++--
+ net/bridge/netfilter/ebtables.c               |   2 +-
+ net/core/filter.c                             |  55 ++++---
+ net/core/sock.c                               |   5 +
+ net/ipv4/fib_trie.c                           |   7 +-
+ net/ipv4/icmp.c                               |  12 +-
+ net/ipv4/inet_connection_sock.c               |  63 +++++---
+ net/ipv4/inet_hashtables.c                    |   3 +-
+ net/ipv4/ip_gre.c                             |  11 +-
+ net/ipv4/ip_options.c                         |   4 +
+ net/ipv4/netfilter/arp_tables.c               |  15 +-
+ net/ipv4/netfilter/ip_tables.c                |  15 +-
+ net/ipv4/netfilter/nf_reject_ipv4.c           |  25 +++
+ net/ipv4/raw.c                                |   2 +-
+ net/ipv4/route.c                              |   5 +
+ net/ipv4/sysctl_net_ipv4.c                    |   2 +-
+ net/ipv4/tcp.c                                |   6 +-
+ net/ipv6/addrconf.c                           |  14 +-
+ net/ipv6/datagram.c                           |  64 +++++++-
+ net/ipv6/exthdrs.c                            |  44 +++--
+ net/ipv6/icmp.c                               |  17 +-
+ net/ipv6/ip6_output.c                         |  39 +++--
+ net/ipv6/mcast.c                              |   8 +-
+ net/ipv6/ndisc.c                              |   4 +-
+ net/ipv6/netfilter/ip6_tables.c               |  15 +-
+ net/ipv6/netfilter/nf_reject_ipv6.c           |  30 ++++
+ net/ipv6/raw.c                                |   2 +-
+ net/ipv6/route.c                              |   8 +-
+ net/ipv6/seg6_hmac.c                          |   2 +
+ net/ipv6/sit.c                                |   1 +
+ net/ipv6/udp.c                                |   2 +-
+ net/netfilter/ipset/ip_set_hash_ipmark.c      |   6 +-
+ net/netfilter/ipset/ip_set_hash_ipport.c      |   5 +-
+ net/netfilter/ipset/ip_set_hash_ipportip.c    |   5 +-
+ net/netfilter/ipset/ip_set_hash_ipportnet.c   |   5 +-
+ net/netfilter/nf_conncount.c                  |  24 ++-
+ net/netfilter/nf_conntrack_expect.c           |   4 +
+ net/netfilter/nf_conntrack_h323_asn1.c        |   6 +-
+ net/netfilter/nf_conntrack_helper.c           |   2 +-
+ net/netfilter/nf_conntrack_netlink.c          |  49 +++---
+ net/netfilter/nf_conntrack_proto_sctp.c       |   3 +-
+ net/netfilter/nf_conntrack_proto_tcp.c        |   3 +-
+ net/netfilter/nf_log.c                        |   4 +-
+ net/netfilter/nfnetlink_log.c                 |  18 +--
+ net/netfilter/nfnetlink_queue.c               |   4 +-
+ net/netfilter/nft_connlimit.c                 |   7 +-
+ net/netfilter/x_tables.c                      |  25 ++-
+ net/netfilter/xt_CT.c                         |   4 +
+ net/netfilter/xt_socket.c                     |  23 +--
+ net/sched/cls_flow.c                          |  10 +-
+ net/sched/cls_fw.c                            |  20 ++-
+ net/sched/sch_cake.c                          |  15 +-
+ net/sched/sch_fq_codel.c                      |   3 +-
+ net/sched/sch_netem.c                         |  44 ++++-
+ scripts/setlocalversion                       |   2 +-
+ tools/lib/bpf/relo_core.c                     |   2 +
+ .../selftests/bpf/prog_tests/snprintf.c       |   3 +-
+ .../bpf/prog_tests/xdp_adjust_tail.c          |  96 ++++++++++-
+ .../bpf/progs/test_xdp_adjust_tail_grow.c     |   8 +-
+ 92 files changed, 1171 insertions(+), 498 deletions(-)
+
+diff --git a/arch/arm64/crypto/aes-modes.S b/arch/arm64/crypto/aes-modes.S
+index 5abc834271f4..3c01b75deffb 100644
+--- a/arch/arm64/crypto/aes-modes.S
++++ b/arch/arm64/crypto/aes-modes.S
+@@ -848,7 +848,7 @@ AES_FUNC_START(aes_mac_update)
+ 	encrypt_block	v0, w2, x1, x7, w8
+ 	eor		v0.16b, v0.16b, v4.16b
+ 	cmp		w3, wzr
+-	csinv		x5, x6, xzr, eq
++	csinv		w5, w6, wzr, eq
+ 	cbz		w5, .Lmacout
+ 	encrypt_block	v0, w2, x1, x7, w8
+ 	st1		{v0.16b}, [x4]			/* return dg */
+@@ -862,7 +862,7 @@ AES_FUNC_START(aes_mac_update)
+ 	eor		v0.16b, v0.16b, v1.16b		/* ..and xor with dg */
+ 
+ 	subs		w3, w3, #1
+-	csinv		x5, x6, xzr, eq
++	csinv		w5, w6, wzr, eq
+ 	cbz		w5, .Lmacout
+ 
+ .Lmacenc:
+diff --git a/crypto/Kconfig b/crypto/Kconfig
+index 2c4e3b0f2858..0fe0f2b85f72 100644
+--- a/crypto/Kconfig
++++ b/crypto/Kconfig
+@@ -279,7 +279,6 @@ config CRYPTO_AUTHENC
+ 	select CRYPTO_SKCIPHER
+ 	select CRYPTO_MANAGER
+ 	select CRYPTO_HASH
+-	select CRYPTO_NULL
+ 	help
+ 	  Authenc: Combined mode wrapper for IPsec.
+ 
+diff --git a/crypto/asymmetric_keys/asymmetric_type.c b/crypto/asymmetric_keys/asymmetric_type.c
+index 3e4f5a361612..9d144142e88e 100644
+--- a/crypto/asymmetric_keys/asymmetric_type.c
++++ b/crypto/asymmetric_keys/asymmetric_type.c
+@@ -11,6 +11,7 @@
+ #include <crypto/public_key.h>
+ #include <linux/seq_file.h>
+ #include <linux/module.h>
++#include <linux/overflow.h>
+ #include <linux/slab.h>
+ #include <linux/ctype.h>
+ #include <keys/system_keyring.h>
+@@ -152,12 +153,17 @@ struct asymmetric_key_id *asymmetric_key_generate_id(const void *val_1,
+ 						     size_t len_2)
+ {
+ 	struct asymmetric_key_id *kid;
+-
+-	kid = kmalloc(sizeof(struct asymmetric_key_id) + len_1 + len_2,
+-		      GFP_KERNEL);
++	size_t kid_sz;
++	size_t len;
++
++	if (check_add_overflow(len_1, len_2, &len))
++		return ERR_PTR(-EOVERFLOW);
++	if (check_add_overflow(sizeof(struct asymmetric_key_id), len, &kid_sz))
++		return ERR_PTR(-EOVERFLOW);
++	kid = kmalloc(kid_sz, GFP_KERNEL);
+ 	if (!kid)
+ 		return ERR_PTR(-ENOMEM);
+-	kid->len = len_1 + len_2;
++	kid->len = len;
+ 	memcpy(kid->data, val_1, len_1);
+ 	memcpy(kid->data + len_1, val_2, len_2);
+ 	return kid;
+diff --git a/crypto/authenc.c b/crypto/authenc.c
+index 17f674a7cdff..2b402e764529 100644
+--- a/crypto/authenc.c
++++ b/crypto/authenc.c
+@@ -9,7 +9,6 @@
+ #include <crypto/internal/hash.h>
+ #include <crypto/internal/skcipher.h>
+ #include <crypto/authenc.h>
+-#include <crypto/null.h>
+ #include <crypto/scatterwalk.h>
+ #include <linux/err.h>
+ #include <linux/init.h>
+@@ -28,7 +27,6 @@ struct authenc_instance_ctx {
+ struct crypto_authenc_ctx {
+ 	struct crypto_ahash *auth;
+ 	struct crypto_skcipher *enc;
+-	struct crypto_sync_skcipher *null;
+ };
+ 
+ struct authenc_request_ctx {
+@@ -174,21 +172,6 @@ static void crypto_authenc_encrypt_done(struct crypto_async_request *req,
+ 	authenc_request_complete(areq, err);
+ }
+ 
+-static int crypto_authenc_copy_assoc(struct aead_request *req)
+-{
+-	struct crypto_aead *authenc = crypto_aead_reqtfm(req);
+-	struct crypto_authenc_ctx *ctx = crypto_aead_ctx(authenc);
+-	SYNC_SKCIPHER_REQUEST_ON_STACK(skreq, ctx->null);
+-
+-	skcipher_request_set_sync_tfm(skreq, ctx->null);
+-	skcipher_request_set_callback(skreq, aead_request_flags(req),
+-				      NULL, NULL);
+-	skcipher_request_set_crypt(skreq, req->src, req->dst, req->assoclen,
+-				   NULL);
+-
+-	return crypto_skcipher_encrypt(skreq);
+-}
+-
+ static int crypto_authenc_encrypt(struct aead_request *req)
+ {
+ 	struct crypto_aead *authenc = crypto_aead_reqtfm(req);
+@@ -207,10 +190,7 @@ static int crypto_authenc_encrypt(struct aead_request *req)
+ 	dst = src;
+ 
+ 	if (req->src != req->dst) {
+-		err = crypto_authenc_copy_assoc(req);
+-		if (err)
+-			return err;
+-
++		memcpy_sglist(req->dst, req->src, req->assoclen);
+ 		dst = scatterwalk_ffwd(areq_ctx->dst, req->dst, req->assoclen);
+ 	}
+ 
+@@ -311,7 +291,6 @@ static int crypto_authenc_init_tfm(struct crypto_aead *tfm)
+ 	struct crypto_authenc_ctx *ctx = crypto_aead_ctx(tfm);
+ 	struct crypto_ahash *auth;
+ 	struct crypto_skcipher *enc;
+-	struct crypto_sync_skcipher *null;
+ 	int err;
+ 
+ 	auth = crypto_spawn_ahash(&ictx->auth);
+@@ -323,14 +302,8 @@ static int crypto_authenc_init_tfm(struct crypto_aead *tfm)
+ 	if (IS_ERR(enc))
+ 		goto err_free_ahash;
+ 
+-	null = crypto_get_default_null_skcipher();
+-	err = PTR_ERR(null);
+-	if (IS_ERR(null))
+-		goto err_free_skcipher;
+-
+ 	ctx->auth = auth;
+ 	ctx->enc = enc;
+-	ctx->null = null;
+ 
+ 	crypto_aead_set_reqsize(
+ 		tfm,
+@@ -344,8 +317,6 @@ static int crypto_authenc_init_tfm(struct crypto_aead *tfm)
+ 
+ 	return 0;
+ 
+-err_free_skcipher:
+-	crypto_free_skcipher(enc);
+ err_free_ahash:
+ 	crypto_free_ahash(auth);
+ 	return err;
+@@ -357,7 +328,6 @@ static void crypto_authenc_exit_tfm(struct crypto_aead *tfm)
+ 
+ 	crypto_free_ahash(ctx->auth);
+ 	crypto_free_skcipher(ctx->enc);
+-	crypto_put_default_null_skcipher();
+ }
+ 
+ static void crypto_authenc_free(struct aead_instance *inst)
+diff --git a/crypto/authencesn.c b/crypto/authencesn.c
+index 6487b35851d5..67449fdd5dac 100644
+--- a/crypto/authencesn.c
++++ b/crypto/authencesn.c
+@@ -12,7 +12,6 @@
+ #include <crypto/internal/hash.h>
+ #include <crypto/internal/skcipher.h>
+ #include <crypto/authenc.h>
+-#include <crypto/null.h>
+ #include <crypto/scatterwalk.h>
+ #include <linux/err.h>
+ #include <linux/init.h>
+@@ -31,7 +30,6 @@ struct crypto_authenc_esn_ctx {
+ 	unsigned int reqoff;
+ 	struct crypto_ahash *auth;
+ 	struct crypto_skcipher *enc;
+-	struct crypto_sync_skcipher *null;
+ };
+ 
+ struct authenc_esn_request_ctx {
+@@ -164,20 +162,6 @@ static void crypto_authenc_esn_encrypt_done(struct crypto_async_request *req,
+ 	authenc_esn_request_complete(areq, err);
+ }
+ 
+-static int crypto_authenc_esn_copy(struct aead_request *req, unsigned int len)
+-{
+-	struct crypto_aead *authenc_esn = crypto_aead_reqtfm(req);
+-	struct crypto_authenc_esn_ctx *ctx = crypto_aead_ctx(authenc_esn);
+-	SYNC_SKCIPHER_REQUEST_ON_STACK(skreq, ctx->null);
+-
+-	skcipher_request_set_sync_tfm(skreq, ctx->null);
+-	skcipher_request_set_callback(skreq, aead_request_flags(req),
+-				      NULL, NULL);
+-	skcipher_request_set_crypt(skreq, req->src, req->dst, len, NULL);
+-
+-	return crypto_skcipher_encrypt(skreq);
+-}
+-
+ static int crypto_authenc_esn_encrypt(struct aead_request *req)
+ {
+ 	struct crypto_aead *authenc_esn = crypto_aead_reqtfm(req);
+@@ -199,10 +183,7 @@ static int crypto_authenc_esn_encrypt(struct aead_request *req)
+ 	dst = src;
+ 
+ 	if (req->src != req->dst) {
+-		err = crypto_authenc_esn_copy(req, assoclen);
+-		if (err)
+-			return err;
+-
++		memcpy_sglist(req->dst, req->src, assoclen);
+ 		sg_init_table(areq_ctx->dst, 2);
+ 		dst = scatterwalk_ffwd(areq_ctx->dst, req->dst, assoclen);
+ 	}
+@@ -292,11 +273,8 @@ static int crypto_authenc_esn_decrypt(struct aead_request *req)
+ 
+ 	cryptlen -= authsize;
+ 
+-	if (req->src != dst) {
+-		err = crypto_authenc_esn_copy(req, assoclen + cryptlen);
+-		if (err)
+-			return err;
+-	}
++	if (req->src != dst)
++		memcpy_sglist(dst, req->src, assoclen + cryptlen);
+ 
+ 	scatterwalk_map_and_copy(ihash, req->src, assoclen + cryptlen,
+ 				 authsize, 0);
+@@ -332,7 +310,6 @@ static int crypto_authenc_esn_init_tfm(struct crypto_aead *tfm)
+ 	struct crypto_authenc_esn_ctx *ctx = crypto_aead_ctx(tfm);
+ 	struct crypto_ahash *auth;
+ 	struct crypto_skcipher *enc;
+-	struct crypto_sync_skcipher *null;
+ 	int err;
+ 
+ 	auth = crypto_spawn_ahash(&ictx->auth);
+@@ -344,14 +321,8 @@ static int crypto_authenc_esn_init_tfm(struct crypto_aead *tfm)
+ 	if (IS_ERR(enc))
+ 		goto err_free_ahash;
+ 
+-	null = crypto_get_default_null_skcipher();
+-	err = PTR_ERR(null);
+-	if (IS_ERR(null))
+-		goto err_free_skcipher;
+-
+ 	ctx->auth = auth;
+ 	ctx->enc = enc;
+-	ctx->null = null;
+ 
+ 	ctx->reqoff = ALIGN(2 * crypto_ahash_digestsize(auth),
+ 			    crypto_ahash_alignmask(auth) + 1);
+@@ -368,8 +339,6 @@ static int crypto_authenc_esn_init_tfm(struct crypto_aead *tfm)
+ 
+ 	return 0;
+ 
+-err_free_skcipher:
+-	crypto_free_skcipher(enc);
+ err_free_ahash:
+ 	crypto_free_ahash(auth);
+ 	return err;
+@@ -381,7 +350,6 @@ static void crypto_authenc_esn_exit_tfm(struct crypto_aead *tfm)
+ 
+ 	crypto_free_ahash(ctx->auth);
+ 	crypto_free_skcipher(ctx->enc);
+-	crypto_put_default_null_skcipher();
+ }
+ 
+ static void crypto_authenc_esn_free(struct aead_instance *inst)
+@@ -420,6 +388,11 @@ static int crypto_authenc_esn_create(struct crypto_template *tmpl,
+ 	auth = crypto_spawn_ahash_alg(&ctx->auth);
+ 	auth_base = &auth->base;
+ 
++	if (auth->digestsize > 0 && auth->digestsize < 4) {
++		err = -EINVAL;
++		goto err_free_inst;
++	}
++
+ 	err = crypto_grab_skcipher(&ctx->enc, aead_crypto_instance(inst),
+ 				   crypto_attr_alg_name(tb[2]), 0, mask);
+ 	if (err)
+diff --git a/crypto/scatterwalk.c b/crypto/scatterwalk.c
+index 16f6ba896fb6..9f0b27005166 100644
+--- a/crypto/scatterwalk.c
++++ b/crypto/scatterwalk.c
+@@ -69,6 +69,100 @@ void scatterwalk_map_and_copy(void *buf, struct scatterlist *sg,
+ }
+ EXPORT_SYMBOL_GPL(scatterwalk_map_and_copy);
+ 
++/**
++ * memcpy_sglist() - Copy data from one scatterlist to another
++ * @dst: The destination scatterlist.  Can be NULL if @nbytes == 0.
++ * @src: The source scatterlist.  Can be NULL if @nbytes == 0.
++ * @nbytes: Number of bytes to copy
++ *
++ * The scatterlists can describe exactly the same memory, in which case this
++ * function is a no-op.  No other overlaps are supported.
++ *
++ * Context: Any context
++ */
++void memcpy_sglist(struct scatterlist *dst, struct scatterlist *src,
++		   unsigned int nbytes)
++{
++	unsigned int src_offset, dst_offset;
++
++	if (unlikely(nbytes == 0)) /* in case src and/or dst is NULL */
++		return;
++
++	src_offset = src->offset;
++	dst_offset = dst->offset;
++	for (;;) {
++		/* Compute the length to copy this step. */
++		unsigned int len = min3(src->offset + src->length - src_offset,
++					dst->offset + dst->length - dst_offset,
++					nbytes);
++		struct page *src_page = sg_page(src);
++		struct page *dst_page = sg_page(dst);
++		const void *src_virt;
++		void *dst_virt;
++
++		if (IS_ENABLED(CONFIG_HIGHMEM)) {
++			/* HIGHMEM: we may have to actually map the pages. */
++			const unsigned int src_oip = offset_in_page(src_offset);
++			const unsigned int dst_oip = offset_in_page(dst_offset);
++			const unsigned int limit = PAGE_SIZE;
++
++			/* Further limit len to not cross a page boundary. */
++			len = min3(len, limit - src_oip, limit - dst_oip);
++
++			/* Compute the source and destination pages. */
++			src_page += src_offset / PAGE_SIZE;
++			dst_page += dst_offset / PAGE_SIZE;
++
++			if (src_page != dst_page) {
++				/* Copy between different pages. */
++				memcpy_page(dst_page, dst_oip,
++					    src_page, src_oip, len);
++				flush_dcache_page(dst_page);
++			} else if (src_oip != dst_oip) {
++				/* Copy between different parts of same page. */
++				dst_virt = kmap_local_page(dst_page);
++				memcpy(dst_virt + dst_oip, dst_virt + src_oip,
++				       len);
++				kunmap_local(dst_virt);
++				flush_dcache_page(dst_page);
++			} /* Else, it's the same memory.  No action needed. */
++		} else {
++			/*
++			 * !HIGHMEM: no mapping needed.  Just work in the linear
++			 * buffer of each sg entry.  Note that we can cross page
++			 * boundaries, as they are not significant in this case.
++			 */
++			src_virt = page_address(src_page) + src_offset;
++			dst_virt = page_address(dst_page) + dst_offset;
++			if (src_virt != dst_virt) {
++				memcpy(dst_virt, src_virt, len);
++				if (ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE)
++					__scatterwalk_flush_dcache_pages(
++						dst_page, dst_offset, len);
++			} /* Else, it's the same memory.  No action needed. */
++		}
++		nbytes -= len;
++		if (nbytes == 0) /* No more to copy? */
++			break;
++
++		/*
++		 * There's more to copy.  Advance the offsets by the length
++		 * copied this step, and advance the sg entries as needed.
++		 */
++		src_offset += len;
++		if (src_offset >= src->offset + src->length) {
++			src = sg_next(src);
++			src_offset = src->offset;
++		}
++		dst_offset += len;
++		if (dst_offset >= dst->offset + dst->length) {
++			dst = sg_next(dst);
++			dst_offset = dst->offset;
++		}
++	}
++}
++EXPORT_SYMBOL_GPL(memcpy_sglist);
++
+ struct scatterlist *scatterwalk_ffwd(struct scatterlist dst[2],
+ 				     struct scatterlist *src,
+ 				     unsigned int len)
+diff --git a/crypto/seqiv.c b/crypto/seqiv.c
+index b1bcfe537daf..562ab102226a 100644
+--- a/crypto/seqiv.c
++++ b/crypto/seqiv.c
+@@ -51,6 +51,7 @@ static int seqiv_aead_encrypt(struct aead_request *req)
+ 	struct aead_geniv_ctx *ctx = crypto_aead_ctx(geniv);
+ 	struct aead_request *subreq = aead_request_ctx(req);
+ 	crypto_completion_t compl;
++	bool unaligned_info;
+ 	void *data;
+ 	u8 *info;
+ 	unsigned int ivsize = 8;
+@@ -80,8 +81,9 @@ static int seqiv_aead_encrypt(struct aead_request *req)
+ 			return err;
+ 	}
+ 
+-	if (unlikely(!IS_ALIGNED((unsigned long)info,
+-				 crypto_aead_alignmask(geniv) + 1))) {
++	unaligned_info = !IS_ALIGNED((unsigned long)info,
++				     crypto_aead_alignmask(geniv) + 1);
++	if (unlikely(unaligned_info)) {
+ 		info = kmemdup(req->iv, ivsize, req->base.flags &
+ 			       CRYPTO_TFM_REQ_MAY_SLEEP ? GFP_KERNEL :
+ 			       GFP_ATOMIC);
+@@ -101,7 +103,7 @@ static int seqiv_aead_encrypt(struct aead_request *req)
+ 	scatterwalk_map_and_copy(info, req->dst, req->assoclen, ivsize, 1);
+ 
+ 	err = crypto_aead_encrypt(subreq);
+-	if (unlikely(info != req->iv))
++	if (unlikely(unaligned_info))
+ 		seqiv_aead_encrypt_complete2(req, err);
+ 	return err;
+ }
+diff --git a/drivers/scsi/hosts.c b/drivers/scsi/hosts.c
+index bc19edd57f5e..b7b1f1b01ee3 100644
+--- a/drivers/scsi/hosts.c
++++ b/drivers/scsi/hosts.c
+@@ -600,8 +600,9 @@ int scsi_host_busy(struct Scsi_Host *shost)
+ {
+ 	int cnt = 0;
+ 
+-	blk_mq_tagset_busy_iter(&shost->tag_set,
+-				scsi_host_check_in_flight, &cnt);
++	if (shost->tag_set.ops)
++		blk_mq_tagset_busy_iter(&shost->tag_set,
++					scsi_host_check_in_flight, &cnt);
+ 	return cnt;
+ }
+ EXPORT_SYMBOL(scsi_host_busy);
+diff --git a/drivers/scsi/scsi_error.c b/drivers/scsi/scsi_error.c
+index fc01cbe63ab7..b65ede883fa6 100644
+--- a/drivers/scsi/scsi_error.c
++++ b/drivers/scsi/scsi_error.c
+@@ -282,11 +282,20 @@ static void scsi_eh_inc_host_failed(struct rcu_head *head)
+ {
+ 	struct scsi_cmnd *scmd = container_of(head, typeof(*scmd), rcu);
+ 	struct Scsi_Host *shost = scmd->device->host;
+-	unsigned int busy = scsi_host_busy(shost);
++	unsigned int busy;
+ 	unsigned long flags;
+ 
+ 	spin_lock_irqsave(shost->host_lock, flags);
+ 	shost->host_failed++;
++	spin_unlock_irqrestore(shost->host_lock, flags);
++	/*
++	 * The counting of busy requests needs to occur after adding to
++	 * host_failed or after the lock acquire for adding to host_failed
++	 * to prevent a race with host unbusy and missing an eh wakeup.
++	 */
++	busy = scsi_host_busy(shost);
++
++	spin_lock_irqsave(shost->host_lock, flags);
+ 	scsi_eh_wakeup(shost, busy);
+ 	spin_unlock_irqrestore(shost->host_lock, flags);
+ }
+diff --git a/drivers/scsi/scsi_lib.c b/drivers/scsi/scsi_lib.c
+index d6eb057af060..3509782553d8 100644
+--- a/drivers/scsi/scsi_lib.c
++++ b/drivers/scsi/scsi_lib.c
+@@ -279,6 +279,14 @@ static void scsi_dec_host_busy(struct Scsi_Host *shost, struct scsi_cmnd *cmd)
+ 	rcu_read_lock();
+ 	__clear_bit(SCMD_STATE_INFLIGHT, &cmd->state);
+ 	if (unlikely(scsi_host_in_recovery(shost))) {
++		/*
++		 * Ensure the clear of SCMD_STATE_INFLIGHT is visible to
++		 * other CPUs before counting busy requests. Otherwise,
++		 * reordering can cause CPUs to race and miss an eh wakeup
++		 * when no CPU sees all busy requests as done or timed out.
++		 */
++		smp_mb();
++
+ 		unsigned int busy = scsi_host_busy(shost);
+ 
+ 		spin_lock_irqsave(shost->host_lock, flags);
+diff --git a/drivers/scsi/scsi_scan.c b/drivers/scsi/scsi_scan.c
+index 3e9f0dedd6e2..c759c979113b 100644
+--- a/drivers/scsi/scsi_scan.c
++++ b/drivers/scsi/scsi_scan.c
+@@ -355,6 +355,7 @@ static struct scsi_device *scsi_alloc_sdev(struct scsi_target *starget,
+ 	 * since we use this queue depth most of times.
+ 	 */
+ 	if (scsi_realloc_sdev_budget_map(sdev, depth)) {
++		kref_put(&sdev->host->tagset_refcnt, scsi_mq_free_tags);
+ 		put_device(&starget->dev);
+ 		kfree(sdev);
+ 		goto out;
+diff --git a/drivers/scsi/sd.c b/drivers/scsi/sd.c
+index a2911469c767..27110ba6960d 100644
+--- a/drivers/scsi/sd.c
++++ b/drivers/scsi/sd.c
+@@ -3518,6 +3518,7 @@ static int sd_probe(struct device *dev)
+ 	error = device_add(&sdkp->disk_dev);
+ 	if (error) {
+ 		put_device(&sdkp->disk_dev);
++		put_disk(gd);
+ 		goto out;
+ 	}
+ 
+diff --git a/drivers/ufs/core/ufshcd.c b/drivers/ufs/core/ufshcd.c
+index b52e9c019a0d..8b7da92840fc 100755
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -2484,13 +2484,11 @@ ufshcd_wait_for_uic_cmd(struct ufs_hba *hba, struct uic_command *uic_cmd)
+  * __ufshcd_send_uic_cmd - Send UIC commands and retrieve the result
+  * @hba: per adapter instance
+  * @uic_cmd: UIC command
+- * @completion: initialize the completion only if this is set to true
+  *
+  * Returns 0 only if success.
+  */
+ static int
+-__ufshcd_send_uic_cmd(struct ufs_hba *hba, struct uic_command *uic_cmd,
+-		      bool completion)
++__ufshcd_send_uic_cmd(struct ufs_hba *hba, struct uic_command *uic_cmd)
+ {
+ 	lockdep_assert_held(&hba->uic_cmd_mutex);
+ 
+@@ -2500,8 +2498,7 @@ __ufshcd_send_uic_cmd(struct ufs_hba *hba, struct uic_command *uic_cmd,
+ 		return -EIO;
+ 	}
+ 
+-	if (completion)
+-		init_completion(&uic_cmd->done);
++	init_completion(&uic_cmd->done);
+ 
+ 	uic_cmd->cmd_active = 1;
+ 	ufshcd_dispatch_uic_cmd(hba, uic_cmd);
+@@ -2527,7 +2524,7 @@ int ufshcd_send_uic_cmd(struct ufs_hba *hba, struct uic_command *uic_cmd)
+ 	mutex_lock(&hba->uic_cmd_mutex);
+ 	ufshcd_add_delay_before_dme_cmd(hba);
+ 
+-	ret = __ufshcd_send_uic_cmd(hba, uic_cmd, true);
++	ret = __ufshcd_send_uic_cmd(hba, uic_cmd);
+ 	if (!ret)
+ 		ret = ufshcd_wait_for_uic_cmd(hba, uic_cmd);
+ 
+@@ -3768,7 +3765,7 @@ int ufshcd_read_string_desc(struct ufs_hba *hba, u8 desc_index,
+ 		str[ret++] = '\0';
+ 
+ 	} else {
+-		str = kmemdup(uc_str, uc_str->len, GFP_KERNEL);
++		str = kmemdup(uc_str->uc, uc_str->len, GFP_KERNEL);
+ 		if (!str) {
+ 			ret = -ENOMEM;
+ 			goto out;
+@@ -4213,8 +4210,8 @@ int ufshcd_dme_get_attr(struct ufs_hba *hba, u32 attr_sel,
+ 			get, UIC_GET_ATTR_ID(attr_sel),
+ 			UFS_UIC_COMMAND_RETRIES - retries);
+ 
+-	if (mib_val && !ret)
+-		*mib_val = uic_cmd.argument3;
++	if (mib_val)
++		*mib_val = ret == 0 ? uic_cmd.argument3 : 0;
+ 
+ 	if (peer && (hba->quirks & UFSHCD_QUIRK_DME_PEER_ACCESS_AUTO_MODE)
+ 	    && pwr_mode_change)
+@@ -4267,7 +4264,7 @@ static int ufshcd_uic_pwr_ctrl(struct ufs_hba *hba, struct uic_command *cmd)
+ 		reenable_intr = true;
+ 	}
+ 	spin_unlock_irqrestore(hba->host->host_lock, flags);
+-	ret = __ufshcd_send_uic_cmd(hba, cmd, false);
++	ret = __ufshcd_send_uic_cmd(hba, cmd);
+ 	if (ret) {
+ 		dev_err(hba->dev,
+ 			"pwr ctrl cmd 0x%x with mode 0x%x uic error %d\n",
+@@ -6386,6 +6383,11 @@ static void ufshcd_clk_scaling_suspend(struct ufs_hba *hba, bool suspend)
+ 
+ static void ufshcd_err_handling_prepare(struct ufs_hba *hba)
+ {
++	/*
++	 * A WLUN resume failure could potentially lead to the HBA being
++	 * runtime suspended, so take an extra reference on hba->dev.
++	 */
++	pm_runtime_get_sync(hba->dev);
+ 	ufshcd_rpm_get_sync(hba);
+ 	if (pm_runtime_status_suspended(&hba->ufs_device_wlun->sdev_gendev) ||
+ 	    hba->is_sys_suspended) {
+@@ -6426,6 +6428,7 @@ static void ufshcd_err_handling_unprepare(struct ufs_hba *hba)
+ 	if (ufshcd_is_clkscaling_supported(hba))
+ 		ufshcd_clk_scaling_suspend(hba, false);
+ 	ufshcd_rpm_put(hba);
++	pm_runtime_put(hba->dev);
+ }
+ 
+ static inline bool ufshcd_err_handling_should_stop(struct ufs_hba *hba)
+@@ -6440,28 +6443,42 @@ static inline bool ufshcd_err_handling_should_stop(struct ufs_hba *hba)
+ #ifdef CONFIG_PM
+ static void ufshcd_recover_pm_error(struct ufs_hba *hba)
+ {
++	struct scsi_target *starget = hba->ufs_device_wlun->sdev_target;
+ 	struct Scsi_Host *shost = hba->host;
+ 	struct scsi_device *sdev;
+ 	struct request_queue *q;
+-	int ret;
++	bool resume_sdev_queues = false;
+ 
+ 	hba->is_sys_suspended = false;
++
+ 	/*
+-	 * Set RPM status of wlun device to RPM_ACTIVE,
+-	 * this also clears its runtime error.
++	 * Ensure the parent's error status is cleared before proceeding
++	 * to the child, as the parent must be active to activate the child.
+ 	 */
+-	ret = pm_runtime_set_active(&hba->ufs_device_wlun->sdev_gendev);
++	if (hba->dev->power.runtime_error) {
++		/* hba->dev has no functional parent thus simplily set RPM_ACTIVE */
++		pm_runtime_set_active(hba->dev);
++		resume_sdev_queues = true;
++	}
++
++	if (hba->ufs_device_wlun->sdev_gendev.power.runtime_error) {
++		/*
++		 * starget, parent of wlun, might be suspended if wlun resume failed.
++		 * Make sure parent is resumed before set child (wlun) active.
++		 */
++		pm_runtime_get_sync(&starget->dev);
++		pm_runtime_set_active(&hba->ufs_device_wlun->sdev_gendev);
++		pm_runtime_put_sync(&starget->dev);
++		resume_sdev_queues = true;
++	}
+ 
+-	/* hba device might have a runtime error otherwise */
+-	if (ret)
+-		ret = pm_runtime_set_active(hba->dev);
+ 	/*
+ 	 * If wlun device had runtime error, we also need to resume those
+ 	 * consumer scsi devices in case any of them has failed to be
+ 	 * resumed due to supplier runtime resume failure. This is to unblock
+ 	 * blk_queue_enter in case there are bios waiting inside it.
+ 	 */
+-	if (!ret) {
++	if (resume_sdev_queues) {
+ 		shost_for_each_device(sdev, shost) {
+ 			q = sdev->request_queue;
+ 			if (q->dev && (q->rpm_status == RPM_SUSPENDED ||
+@@ -9659,6 +9676,8 @@ static int __ufshcd_wl_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
+ 
+ 	if (req_dev_pwr_mode == UFS_ACTIVE_PWR_MODE &&
+ 			req_link_state == UIC_LINK_ACTIVE_STATE) {
++		ufshcd_disable_auto_bkops(hba);
++		flush_work(&hba->eeh_work);
+ 		goto vops_suspend;
+ 	}
+ 
+@@ -10044,7 +10063,7 @@ static int ufshcd_suspend(struct ufs_hba *hba)
+ 	ret = ufshcd_setup_clocks(hba, false);
+ 	if (ret) {
+ 		ufshcd_enable_irq(hba);
+-		return ret;
++		goto out;
+ 	}
+ 	if (ufshcd_is_clkgating_allowed(hba)) {
+ 		hba->clk_gating.state = CLKS_OFF;
+@@ -10055,6 +10074,9 @@ static int ufshcd_suspend(struct ufs_hba *hba)
+ 	ufshcd_vreg_set_lpm(hba);
+ 	/* Put the host controller in low power mode if possible */
+ 	ufshcd_hba_vreg_set_lpm(hba);
++out:
++	if (ret)
++		ufshcd_update_evt_hist(hba, UFS_EVT_SUSPEND_ERR, (u32)ret);
+ 	return ret;
+ }
+ 
+diff --git a/fs/ext4/crypto.c b/fs/ext4/crypto.c
+index f23c52f06a2e..2e961a3a13bf 100644
+--- a/fs/ext4/crypto.c
++++ b/fs/ext4/crypto.c
+@@ -169,10 +169,17 @@ static int ext4_set_context(struct inode *inode, const void *ctx, size_t len,
+ 	 */
+ 
+ 	if (handle) {
++		/*
++		 * Since the inode is new it is ok to pass the
++		 * XATTR_CREATE flag. This is necessary to match the
++		 * remaining journal credits check in the set_handle
++		 * function with the credits allocated for the new
++		 * inode.
++		 */
+ 		res = ext4_xattr_set_handle(handle, inode,
+ 					    EXT4_XATTR_INDEX_ENCRYPTION,
+ 					    EXT4_XATTR_NAME_ENCRYPTION_CONTEXT,
+-					    ctx, len, 0);
++					    ctx, len, XATTR_CREATE);
+ 		if (!res) {
+ 			ext4_set_inode_flag(inode, EXT4_INODE_ENCRYPT);
+ 			ext4_clear_inode_state(inode,
+diff --git a/fs/ext4/extents.c b/fs/ext4/extents.c
+index 53fd2431062c..d8232a52c539 100644
+--- a/fs/ext4/extents.c
++++ b/fs/ext4/extents.c
+@@ -1740,6 +1740,13 @@ static int ext4_ext_correct_indexes(handle_t *handle, struct inode *inode,
+ 	err = ext4_ext_get_access(handle, inode, path + k);
+ 	if (err)
+ 		return err;
++	if (unlikely(path[k].p_idx > EXT_LAST_INDEX(path[k].p_hdr))) {
++		EXT4_ERROR_INODE(inode,
++				 "path[%d].p_idx %p > EXT_LAST_INDEX %p",
++				 k, path[k].p_idx,
++				 EXT_LAST_INDEX(path[k].p_hdr));
++		return -EFSCORRUPTED;
++	}
+ 	path[k].p_idx->ei_block = border;
+ 	err = ext4_ext_dirty(handle, inode, path + k);
+ 	if (err)
+@@ -1752,6 +1759,14 @@ static int ext4_ext_correct_indexes(handle_t *handle, struct inode *inode,
+ 		err = ext4_ext_get_access(handle, inode, path + k);
+ 		if (err)
+ 			break;
++		if (unlikely(path[k].p_idx > EXT_LAST_INDEX(path[k].p_hdr))) {
++			EXT4_ERROR_INODE(inode,
++					 "path[%d].p_idx %p > EXT_LAST_INDEX %p",
++					 k, path[k].p_idx,
++					 EXT_LAST_INDEX(path[k].p_hdr));
++			err = -EFSCORRUPTED;
++			break;
++		}
+ 		path[k].p_idx->ei_block = border;
+ 		err = ext4_ext_dirty(handle, inode, path + k);
+ 		if (err)
+@@ -3173,6 +3188,9 @@ static int ext4_split_extent_at(handle_t *handle,
+ 	BUG_ON((split_flag & (EXT4_EXT_DATA_VALID1 | EXT4_EXT_DATA_VALID2)) ==
+ 	       (EXT4_EXT_DATA_VALID1 | EXT4_EXT_DATA_VALID2));
+ 
++	/* Do not cache extents that are in the process of being modified. */
++	flags |= EXT4_EX_NOCACHE;
++
+ 	ext_debug(inode, "logical block %llu\n", (unsigned long long)split);
+ 
+ 	ext4_ext_show_leaf(inode, path);
+@@ -3343,6 +3361,9 @@ static int ext4_split_extent(handle_t *handle,
+ 	ee_len = ext4_ext_get_actual_len(ex);
+ 	unwritten = ext4_ext_is_unwritten(ex);
+ 
++	/* Do not cache extents that are in the process of being modified. */
++	flags |= EXT4_EX_NOCACHE;
++
+ 	if (map->m_lblk + map->m_len < ee_block + ee_len) {
+ 		split_flag1 = split_flag & EXT4_EXT_MAY_ZEROOUT;
+ 		flags1 = flags | EXT4_GET_BLOCKS_PRE_IO;
+@@ -5260,7 +5281,8 @@ ext4_ext_shift_extents(struct inode *inode, handle_t *handle,
+ 		if (!extent) {
+ 			EXT4_ERROR_INODE(inode, "unexpected hole at %lu",
+ 					 (unsigned long) *iterator);
+-			return -EFSCORRUPTED;
++			ret = -EFSCORRUPTED;
++			goto out;
+ 		}
+ 		if (SHIFT == SHIFT_LEFT && *iterator >
+ 		    le32_to_cpu(extent->ee_block)) {
+diff --git a/fs/ext4/fast_commit.c b/fs/ext4/fast_commit.c
+index e2062cd4adad..49076dedd591 100644
+--- a/fs/ext4/fast_commit.c
++++ b/fs/ext4/fast_commit.c
+@@ -675,7 +675,7 @@ void ext4_fc_track_range(handle_t *handle, struct inode *inode, ext4_lblk_t star
+ 
+ static void ext4_fc_submit_bh(struct super_block *sb, bool is_tail)
+ {
+-	blk_opf_t write_flags = REQ_SYNC;
++	blk_opf_t write_flags = JBD2_JOURNAL_REQ_FLAGS;
+ 	struct buffer_head *bh = EXT4_SB(sb)->s_fc_bh;
+ 
+ 	/* Add REQ_FUA | REQ_PREFLUSH only its tail */
+@@ -1019,7 +1019,7 @@ static int ext4_fc_submit_inode_data_all(journal_t *journal)
+ 			finish_wait(&ei->i_fc_wait, &wait);
+ 		}
+ 		spin_unlock(&sbi->s_fc_lock);
+-		ret = jbd2_submit_inode_data(ei->jinode);
++		ret = jbd2_submit_inode_data(READ_ONCE(ei->jinode));
+ 		if (ret)
+ 			return ret;
+ 		spin_lock(&sbi->s_fc_lock);
+@@ -1044,7 +1044,7 @@ static int ext4_fc_wait_inode_data_all(journal_t *journal)
+ 			continue;
+ 		spin_unlock(&sbi->s_fc_lock);
+ 
+-		ret = jbd2_wait_inode_data(journal, pos->jinode);
++		ret = jbd2_wait_inode_data(journal, READ_ONCE(pos->jinode));
+ 		if (ret)
+ 			return ret;
+ 		spin_lock(&sbi->s_fc_lock);
+@@ -1623,19 +1623,21 @@ static int ext4_fc_replay_inode(struct super_block *sb,
+ 	/* Immediately update the inode on disk. */
+ 	ret = ext4_handle_dirty_metadata(NULL, NULL, iloc.bh);
+ 	if (ret)
+-		goto out;
++		goto out_brelse;
+ 	ret = sync_dirty_buffer(iloc.bh);
+ 	if (ret)
+-		goto out;
++		goto out_brelse;
+ 	ret = ext4_mark_inode_used(sb, ino);
+ 	if (ret)
+-		goto out;
++		goto out_brelse;
+ 
+ 	/* Given that we just wrote the inode on disk, this SHOULD succeed. */
+ 	inode = ext4_iget(sb, ino, EXT4_IGET_NORMAL);
+ 	if (IS_ERR(inode)) {
+ 		ext4_debug("Inode not found.");
+-		return -EFSCORRUPTED;
++		inode = NULL;
++		ret = -EFSCORRUPTED;
++		goto out_brelse;
+ 	}
+ 
+ 	/*
+@@ -1652,13 +1654,14 @@ static int ext4_fc_replay_inode(struct super_block *sb,
+ 	ext4_inode_csum_set(inode, ext4_raw_inode(&iloc), EXT4_I(inode));
+ 	ret = ext4_handle_dirty_metadata(NULL, NULL, iloc.bh);
+ 	sync_dirty_buffer(iloc.bh);
++out_brelse:
+ 	brelse(iloc.bh);
+ out:
+ 	iput(inode);
+ 	if (!ret)
+ 		blkdev_issue_flush(sb->s_bdev);
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ /*
+diff --git a/fs/ext4/ialloc.c b/fs/ext4/ialloc.c
+index 8a8d80227560..be057f7ddc24 100644
+--- a/fs/ext4/ialloc.c
++++ b/fs/ext4/ialloc.c
+@@ -687,6 +687,12 @@ static int recently_deleted(struct super_block *sb, ext4_group_t group, int ino)
+ 	if (unlikely(!gdp))
+ 		return 0;
+ 
++	/* Inode was never used in this filesystem? */
++	if (ext4_has_group_desc_csum(sb) &&
++	    (gdp->bg_flags & cpu_to_le16(EXT4_BG_INODE_UNINIT) ||
++	     ino >= EXT4_INODES_PER_GROUP(sb) - ext4_itable_unused_count(sb, gdp)))
++		return 0;
++
+ 	bh = sb_find_get_block(sb, ext4_inode_table(sb, gdp) +
+ 		       (ino / inodes_per_block));
+ 	if (!bh || !buffer_uptodate(bh))
+@@ -1300,7 +1306,6 @@ struct inode *__ext4_new_inode(struct user_namespace *mnt_userns,
+ 					      sizeof(gen));
+ 	}
+ 
+-	ext4_clear_state_flags(ei); /* Only relevant on 32-bit archs */
+ 	ext4_set_inode_state(inode, EXT4_STATE_NEW);
+ 
+ 	ei->i_extra_isize = sbi->s_want_extra_isize;
+diff --git a/fs/ext4/inline.c b/fs/ext4/inline.c
+index 7c9efc9330fe..f760d2f16a1d 100644
+--- a/fs/ext4/inline.c
++++ b/fs/ext4/inline.c
+@@ -406,7 +406,12 @@ static int ext4_prepare_inline_data(handle_t *handle, struct inode *inode,
+ 		return -ENOSPC;
+ 
+ 	ext4_write_lock_xattr(inode, &no_expand);
+-
++	/*
++	 * ei->i_inline_size may have changed since the initial check
++	 * if other xattrs were added. Recalculate to ensure
++	 * ext4_update_inline_data() validates against current capacity.
++	 */
++	(void) ext4_find_inline_data_nolock(inode);
+ 	if (ei->i_inline_off)
+ 		ret = ext4_update_inline_data(handle, inode, len);
+ 	else
+@@ -434,9 +439,13 @@ static int ext4_destroy_inline_data_nolock(handle_t *handle,
+ 	if (!ei->i_inline_off)
+ 		return 0;
+ 
++	down_write(&ei->i_data_sem);
++
+ 	error = ext4_get_inode_loc(inode, &is.iloc);
+-	if (error)
++	if (error) {
++		up_write(&ei->i_data_sem);
+ 		return error;
++	}
+ 
+ 	error = ext4_xattr_ibody_find(inode, &i, &is);
+ 	if (error)
+@@ -475,6 +484,7 @@ static int ext4_destroy_inline_data_nolock(handle_t *handle,
+ 	brelse(is.iloc.bh);
+ 	if (error == -ENODATA)
+ 		error = 0;
++	up_write(&ei->i_data_sem);
+ 	return error;
+ }
+ 
+@@ -500,6 +510,14 @@ static int ext4_read_inline_page(struct inode *inode, struct page *page)
+ 		goto out;
+ 
+ 	len = min_t(size_t, ext4_get_inline_size(inode), i_size_read(inode));
++	if (len > PAGE_SIZE) {
++		ext4_error_inode(inode, __func__, __LINE__, 0,
++				 "inline size %zu exceeds PAGE_SIZE", len);
++		ret = -EFSCORRUPTED;
++		brelse(iloc.bh);
++		goto out;
++	}
++
+ 	kaddr = kmap_atomic(page);
+ 	ret = ext4_read_inline_data(inode, kaddr, len, &iloc);
+ 	flush_dcache_page(page);
+diff --git a/fs/ext4/inode.c b/fs/ext4/inode.c
+index 73d8a7b42c50..70e7569b2941 100644
+--- a/fs/ext4/inode.c
++++ b/fs/ext4/inode.c
+@@ -122,6 +122,8 @@ void ext4_inode_csum_set(struct inode *inode, struct ext4_inode *raw,
+ static inline int ext4_begin_ordered_truncate(struct inode *inode,
+ 					      loff_t new_size)
+ {
++	struct jbd2_inode *jinode = READ_ONCE(EXT4_I(inode)->jinode);
++
+ 	trace_ext4_begin_ordered_truncate(inode, new_size);
+ 	/*
+ 	 * If jinode is zero, then we never opened the file for
+@@ -129,10 +131,10 @@ static inline int ext4_begin_ordered_truncate(struct inode *inode,
+ 	 * jbd2_journal_begin_ordered_truncate() since there's no
+ 	 * outstanding writes we need to flush.
+ 	 */
+-	if (!EXT4_I(inode)->jinode)
++	if (!jinode)
+ 		return 0;
+ 	return jbd2_journal_begin_ordered_truncate(EXT4_JOURNAL(inode),
+-						   EXT4_I(inode)->jinode,
++						   jinode,
+ 						   new_size);
+ }
+ 
+@@ -4180,8 +4182,13 @@ int ext4_inode_attach_jinode(struct inode *inode)
+ 			spin_unlock(&inode->i_lock);
+ 			return -ENOMEM;
+ 		}
+-		ei->jinode = jinode;
+-		jbd2_journal_init_jbd_inode(ei->jinode, inode);
++		jbd2_journal_init_jbd_inode(jinode, inode);
++		/*
++		 * Publish ->jinode only after it is fully initialized so that
++		 * readers never observe a partially initialized jbd2_inode.
++		 */
++		smp_wmb();
++		WRITE_ONCE(ei->jinode, jinode);
+ 		jinode = NULL;
+ 	}
+ 	spin_unlock(&inode->i_lock);
+@@ -4933,7 +4940,6 @@ struct inode *__ext4_iget(struct super_block *sb, unsigned long ino,
+ 	ei->i_projid = make_kprojid(&init_user_ns, i_projid);
+ 	set_nlink(inode, le16_to_cpu(raw_inode->i_links_count));
+ 
+-	ext4_clear_state_flags(ei);	/* Only relevant on 32-bit archs */
+ 	ei->i_inline_off = 0;
+ 	ei->i_dir_start_lookup = 0;
+ 	ei->i_dtime = le32_to_cpu(raw_inode->i_dtime);
+@@ -5538,6 +5544,18 @@ int ext4_setattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+ 		if (attr->ia_size == inode->i_size)
+ 			inc_ivers = false;
+ 
++		/*
++		 * If file has inline data but new size exceeds inline capacity,
++		 * convert to extent-based storage first to prevent inconsistent
++		 * state (inline flag set but size exceeds inline capacity).
++		 */
++		if (ext4_has_inline_data(inode) &&
++		    attr->ia_size > EXT4_I(inode)->i_inline_size) {
++			error = ext4_convert_inline_data(inode);
++			if (error)
++				goto err_out;
++		}
++
+ 		if (shrink) {
+ 			if (ext4_should_order_data(inode)) {
+ 				error = ext4_begin_ordered_truncate(inode,
+diff --git a/fs/ext4/ioctl.c b/fs/ext4/ioctl.c
+index 3784f7041649..8447076eae67 100644
+--- a/fs/ext4/ioctl.c
++++ b/fs/ext4/ioctl.c
+@@ -950,6 +950,7 @@ static long ext4_ioctl_group_add(struct file *file,
+ 
+ 	err = ext4_group_add(sb, input);
+ 	if (EXT4_SB(sb)->s_journal) {
++		ext4_fc_mark_ineligible(sb, EXT4_FC_REASON_RESIZE, NULL);
+ 		jbd2_journal_lock_updates(EXT4_SB(sb)->s_journal);
+ 		err2 = jbd2_journal_flush(EXT4_SB(sb)->s_journal, 0);
+ 		jbd2_journal_unlock_updates(EXT4_SB(sb)->s_journal);
+@@ -1302,6 +1303,8 @@ static long __ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ 
+ 		err = ext4_group_extend(sb, EXT4_SB(sb)->s_es, n_blocks_count);
+ 		if (EXT4_SB(sb)->s_journal) {
++			ext4_fc_mark_ineligible(sb, EXT4_FC_REASON_RESIZE,
++						NULL);
+ 			jbd2_journal_lock_updates(EXT4_SB(sb)->s_journal);
+ 			err2 = jbd2_journal_flush(EXT4_SB(sb)->s_journal, 0);
+ 			jbd2_journal_unlock_updates(EXT4_SB(sb)->s_journal);
+diff --git a/fs/ext4/mballoc.c b/fs/ext4/mballoc.c
+index 166273584aa4..aa92aca351e0 100644
+--- a/fs/ext4/mballoc.c
++++ b/fs/ext4/mballoc.c
+@@ -666,7 +666,7 @@ do {									\
+ 	}								\
+ } while (0)
+ 
+-static int __mb_check_buddy(struct ext4_buddy *e4b, char *file,
++static void __mb_check_buddy(struct ext4_buddy *e4b, char *file,
+ 				const char *function, int line)
+ {
+ 	struct super_block *sb = e4b->bd_sb;
+@@ -685,7 +685,7 @@ static int __mb_check_buddy(struct ext4_buddy *e4b, char *file,
+ 	void *buddy2;
+ 
+ 	if (e4b->bd_info->bb_check_counter++ % 10)
+-		return 0;
++		return;
+ 
+ 	while (order > 1) {
+ 		buddy = mb_find_buddy(e4b, order, &max);
+@@ -747,17 +747,18 @@ static int __mb_check_buddy(struct ext4_buddy *e4b, char *file,
+ 
+ 	grp = ext4_get_group_info(sb, e4b->bd_group);
+ 	if (!grp)
+-		return NULL;
++		return;
+ 	list_for_each(cur, &grp->bb_prealloc_list) {
+ 		ext4_group_t groupnr;
+ 		struct ext4_prealloc_space *pa;
+ 		pa = list_entry(cur, struct ext4_prealloc_space, pa_group_list);
++		if (!pa->pa_len)
++			continue;
+ 		ext4_get_group_no_and_offset(sb, pa->pa_pstart, &groupnr, &k);
+ 		MB_CHECK_ASSERT(groupnr == e4b->bd_group);
+ 		for (i = 0; i < pa->pa_len; i++)
+ 			MB_CHECK_ASSERT(mb_test_bit(k + i, buddy));
+ 	}
+-	return 0;
+ }
+ #undef MB_CHECK_ASSERT
+ #define mb_check_buddy(e4b) __mb_check_buddy(e4b,	\
+@@ -958,8 +959,6 @@ static inline int should_optimize_scan(struct ext4_allocation_context *ac)
+ 		return 0;
+ 	if (ac->ac_criteria >= 2)
+ 		return 0;
+-	if (!ext4_test_inode_flag(ac->ac_inode, EXT4_INODE_EXTENTS))
+-		return 0;
+ 	return 1;
+ }
+ 
+@@ -2212,8 +2211,12 @@ int ext4_mb_find_by_goal(struct ext4_allocation_context *ac,
+ 		return 0;
+ 
+ 	err = ext4_mb_load_buddy(ac->ac_sb, group, e4b);
+-	if (err)
++	if (err) {
++		if (EXT4_MB_GRP_BBITMAP_CORRUPT(e4b->bd_info) &&
++		    !(ac->ac_flags & EXT4_MB_HINT_GOAL_ONLY))
++			return 0;
+ 		return err;
++	}
+ 
+ 	ext4_lock_group(ac->ac_sb, group);
+ 	if (unlikely(EXT4_MB_GRP_BBITMAP_CORRUPT(e4b->bd_info)))
+@@ -2708,6 +2711,8 @@ ext4_mb_regular_allocator(struct ext4_allocation_context *ac)
+ 		 * from the goal value specified
+ 		 */
+ 		group = ac->ac_g_ex.fe_group;
++		if (group >= ngroups)
++			group = 0;
+ 		ac->ac_groups_linear_remaining = sbi->s_mb_max_linear_groups;
+ 		prefetch_grp = group;
+ 
+@@ -3566,13 +3571,11 @@ int ext4_mb_release(struct super_block *sb)
+ 	struct kmem_cache *cachep = get_groupinfo_cache(sb->s_blocksize_bits);
+ 	int count;
+ 
+-	if (test_opt(sb, DISCARD)) {
+-		/*
+-		 * wait the discard work to drain all of ext4_free_data
+-		 */
+-		flush_work(&sbi->s_discard_work);
+-		WARN_ON_ONCE(!list_empty(&sbi->s_discard_list));
+-	}
++	/*
++	 * wait the discard work to drain all of ext4_free_data
++	 */
++	flush_work(&sbi->s_discard_work);
++	WARN_ON_ONCE(!list_empty(&sbi->s_discard_list));
+ 
+ 	if (sbi->s_group_info) {
+ 		for (i = 0; i < ngroups; i++) {
+@@ -3790,8 +3793,7 @@ void ext4_exit_mballoc(void)
+  * Returns 0 if success or error code
+  */
+ static noinline_for_stack int
+-ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
+-				handle_t *handle, unsigned int reserv_clstrs)
++ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac, handle_t *handle)
+ {
+ 	struct buffer_head *bitmap_bh = NULL;
+ 	struct ext4_group_desc *gdp;
+@@ -3879,13 +3881,6 @@ ext4_mb_mark_diskspace_used(struct ext4_allocation_context *ac,
+ 
+ 	ext4_unlock_group(sb, ac->ac_b_ex.fe_group);
+ 	percpu_counter_sub(&sbi->s_freeclusters_counter, ac->ac_b_ex.fe_len);
+-	/*
+-	 * Now reduce the dirty block count also. Should not go negative
+-	 */
+-	if (!(ac->ac_flags & EXT4_MB_DELALLOC_RESERVED))
+-		/* release all the reserved blocks if non delalloc */
+-		percpu_counter_sub(&sbi->s_dirtyclusters_counter,
+-				   reserv_clstrs);
+ 
+ 	if (sbi->s_log_groups_per_flex) {
+ 		ext4_group_t flex_group = ext4_flex_group(sbi,
+@@ -5780,7 +5775,7 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
+ 			ext4_mb_pa_free(ac);
+ 	}
+ 	if (likely(ac->ac_status == AC_STATUS_FOUND)) {
+-		*errp = ext4_mb_mark_diskspace_used(ac, handle, reserv_clstrs);
++		*errp = ext4_mb_mark_diskspace_used(ac, handle);
+ 		if (*errp) {
+ 			ext4_discard_allocated_blocks(ac);
+ 			goto errout;
+@@ -5812,12 +5807,9 @@ ext4_fsblk_t ext4_mb_new_blocks(handle_t *handle,
+ 		kmem_cache_free(ext4_ac_cachep, ac);
+ 	if (inquota && ar->len < inquota)
+ 		dquot_free_block(ar->inode, EXT4_C2B(sbi, inquota - ar->len));
+-	if (!ar->len) {
+-		if ((ar->flags & EXT4_MB_DELALLOC_RESERVED) == 0)
+-			/* release all the reserved blocks if non delalloc */
+-			percpu_counter_sub(&sbi->s_dirtyclusters_counter,
+-						reserv_clstrs);
+-	}
++	/* release any reserved blocks */
++	if (reserv_clstrs)
++		percpu_counter_sub(&sbi->s_dirtyclusters_counter, reserv_clstrs);
+ 
+ 	trace_ext4_allocate_blocks(ar, (unsigned long long)block);
+ 
+diff --git a/fs/ext4/move_extent.c b/fs/ext4/move_extent.c
+index e8ec213b2144..e01632462db9 100644
+--- a/fs/ext4/move_extent.c
++++ b/fs/ext4/move_extent.c
+@@ -481,7 +481,7 @@ mext_check_arguments(struct inode *orig_inode,
+ 		return -ETXTBSY;
+ 	}
+ 
+-	if (ext4_is_quota_file(orig_inode) && ext4_is_quota_file(donor_inode)) {
++	if (ext4_is_quota_file(orig_inode) || ext4_is_quota_file(donor_inode)) {
+ 		ext4_debug("ext4 move extent: The argument files should not be quota files [ino:orig %lu, donor %lu]\n",
+ 			orig_inode->i_ino, donor_inode->i_ino);
+ 		return -EOPNOTSUPP;
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+index 935a6971fe27..1d3ac26571a9 100644
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -1194,6 +1194,49 @@ static inline void ext4_quota_off_umount(struct super_block *sb)
+ }
+ #endif
+ 
++static int ext4_percpu_param_init(struct ext4_sb_info *sbi)
++{
++	ext4_fsblk_t block;
++	int err;
++
++	block = ext4_count_free_clusters(sbi->s_sb);
++	ext4_free_blocks_count_set(sbi->s_es, EXT4_C2B(sbi, block));
++	err = percpu_counter_init(&sbi->s_freeclusters_counter, block,
++				  GFP_KERNEL);
++	if (!err) {
++		unsigned long freei = ext4_count_free_inodes(sbi->s_sb);
++		sbi->s_es->s_free_inodes_count = cpu_to_le32(freei);
++		err = percpu_counter_init(&sbi->s_freeinodes_counter, freei,
++					  GFP_KERNEL);
++	}
++	if (!err)
++		err = percpu_counter_init(&sbi->s_dirs_counter,
++					  ext4_count_dirs(sbi->s_sb), GFP_KERNEL);
++	if (!err)
++		err = percpu_counter_init(&sbi->s_dirtyclusters_counter, 0,
++					  GFP_KERNEL);
++	if (!err)
++		err = percpu_counter_init(&sbi->s_sra_exceeded_retry_limit, 0,
++					  GFP_KERNEL);
++	if (!err)
++		err = percpu_init_rwsem(&sbi->s_writepages_rwsem);
++
++	if (err)
++		ext4_msg(sbi->s_sb, KERN_ERR, "insufficient memory");
++
++	return err;
++}
++
++static void ext4_percpu_param_destroy(struct ext4_sb_info *sbi)
++{
++	percpu_counter_destroy(&sbi->s_freeclusters_counter);
++	percpu_counter_destroy(&sbi->s_freeinodes_counter);
++	percpu_counter_destroy(&sbi->s_dirs_counter);
++	percpu_counter_destroy(&sbi->s_dirtyclusters_counter);
++	percpu_counter_destroy(&sbi->s_sra_exceeded_retry_limit);
++	percpu_free_rwsem(&sbi->s_writepages_rwsem);
++}
++
+ static void ext4_put_super(struct super_block *sb)
+ {
+ 	struct ext4_sb_info *sbi = EXT4_SB(sb);
+@@ -1260,12 +1303,7 @@ static void ext4_put_super(struct super_block *sb)
+ 		kvfree(flex_groups);
+ 	}
+ 	rcu_read_unlock();
+-	percpu_counter_destroy(&sbi->s_freeclusters_counter);
+-	percpu_counter_destroy(&sbi->s_freeinodes_counter);
+-	percpu_counter_destroy(&sbi->s_dirs_counter);
+-	percpu_counter_destroy(&sbi->s_dirtyclusters_counter);
+-	percpu_counter_destroy(&sbi->s_sra_exceeded_retry_limit);
+-	percpu_free_rwsem(&sbi->s_writepages_rwsem);
++	ext4_percpu_param_destroy(sbi);
+ #ifdef CONFIG_QUOTA
+ 	for (i = 0; i < EXT4_MAXQUOTAS; i++)
+ 		kfree(get_qf_name(sb, sbi, i));
+@@ -1328,6 +1366,7 @@ static struct inode *ext4_alloc_inode(struct super_block *sb)
+ 
+ 	inode_set_iversion(&ei->vfs_inode, 1);
+ 	ei->i_flags = 0;
++	ext4_clear_state_flags(ei);	/* Only relevant on 32-bit archs */
+ 	spin_lock_init(&ei->i_raw_lock);
+ 	INIT_LIST_HEAD(&ei->i_prealloc_list);
+ 	atomic_set(&ei->i_prealloc_active, 0);
+@@ -3546,6 +3585,14 @@ int ext4_feature_set_ok(struct super_block *sb, int readonly)
+ 	}
+ #endif
+ 
++	if (EXT4_SB(sb)->s_es->s_def_hash_version == DX_HASH_SIPHASH &&
++	    !ext4_has_feature_casefold(sb)) {
++		ext4_msg(sb, KERN_ERR,
++			 "Filesystem without casefold feature cannot be "
++			 "mounted with siphash");
++		return 0;
++	}
++
+ 	if (readonly)
+ 		return 1;
+ 
+@@ -3569,6 +3616,13 @@ int ext4_feature_set_ok(struct super_block *sb, int readonly)
+ 			 "extents feature\n");
+ 		return 0;
+ 	}
++	if (ext4_has_feature_bigalloc(sb) &&
++	    le32_to_cpu(EXT4_SB(sb)->s_es->s_first_data_block)) {
++		ext4_msg(sb, KERN_WARNING,
++			 "bad geometry: bigalloc file system with non-zero "
++			 "first_data_block\n");
++		return 0;
++	}
+ 
+ #if !IS_ENABLED(CONFIG_QUOTA) || !IS_ENABLED(CONFIG_QFMT_V2)
+ 	if (!readonly && (ext4_has_feature_quota(sb) ||
+@@ -5029,12 +5083,40 @@ static int ext4_load_super(struct super_block *sb, ext4_fsblk_t *lsb,
+ 	return ret;
+ }
+ 
++static void ext4_hash_info_init(struct super_block *sb)
++{
++	struct ext4_sb_info *sbi = EXT4_SB(sb);
++	struct ext4_super_block *es = sbi->s_es;
++	unsigned int i;
++
++	for (i = 0; i < 4; i++)
++		sbi->s_hash_seed[i] = le32_to_cpu(es->s_hash_seed[i]);
++
++	sbi->s_def_hash_version = es->s_def_hash_version;
++	if (ext4_has_feature_dir_index(sb)) {
++		i = le32_to_cpu(es->s_flags);
++		if (i & EXT2_FLAGS_UNSIGNED_HASH)
++			sbi->s_hash_unsigned = 3;
++		else if ((i & EXT2_FLAGS_SIGNED_HASH) == 0) {
++#ifdef __CHAR_UNSIGNED__
++			if (!sb_rdonly(sb))
++				es->s_flags |=
++					cpu_to_le32(EXT2_FLAGS_UNSIGNED_HASH);
++			sbi->s_hash_unsigned = 3;
++#else
++			if (!sb_rdonly(sb))
++				es->s_flags |=
++					cpu_to_le32(EXT2_FLAGS_SIGNED_HASH);
++#endif
++		}
++	}
++}
++
+ static int __ext4_fill_super(struct fs_context *fc, struct super_block *sb)
+ {
+ 	struct ext4_super_block *es = NULL;
+ 	struct ext4_sb_info *sbi = EXT4_SB(sb);
+ 	struct flex_groups **flex_groups;
+-	ext4_fsblk_t block;
+ 	ext4_fsblk_t logical_sb_block;
+ 	struct inode *root;
+ 	int ret = -ENOMEM;
+@@ -5184,26 +5266,7 @@ static int __ext4_fill_super(struct fs_context *fc, struct super_block *sb)
+ 	sbi->s_addr_per_block_bits = ilog2(EXT4_ADDR_PER_BLOCK(sb));
+ 	sbi->s_desc_per_block_bits = ilog2(EXT4_DESC_PER_BLOCK(sb));
+ 
+-	for (i = 0; i < 4; i++)
+-		sbi->s_hash_seed[i] = le32_to_cpu(es->s_hash_seed[i]);
+-	sbi->s_def_hash_version = es->s_def_hash_version;
+-	if (ext4_has_feature_dir_index(sb)) {
+-		i = le32_to_cpu(es->s_flags);
+-		if (i & EXT2_FLAGS_UNSIGNED_HASH)
+-			sbi->s_hash_unsigned = 3;
+-		else if ((i & EXT2_FLAGS_SIGNED_HASH) == 0) {
+-#ifdef __CHAR_UNSIGNED__
+-			if (!sb_rdonly(sb))
+-				es->s_flags |=
+-					cpu_to_le32(EXT2_FLAGS_UNSIGNED_HASH);
+-			sbi->s_hash_unsigned = 3;
+-#else
+-			if (!sb_rdonly(sb))
+-				es->s_flags |=
+-					cpu_to_le32(EXT2_FLAGS_SIGNED_HASH);
+-#endif
+-		}
+-	}
++	ext4_hash_info_init(sb);
+ 
+ 	if (ext4_handle_clustersize(sb))
+ 		goto failed_mount;
+@@ -5454,33 +5517,8 @@ static int __ext4_fill_super(struct fs_context *fc, struct super_block *sb)
+ 		sbi->s_journal->j_commit_callback =
+ 			ext4_journal_commit_callback;
+ 
+-	block = ext4_count_free_clusters(sb);
+-	ext4_free_blocks_count_set(sbi->s_es,
+-				   EXT4_C2B(sbi, block));
+-	err = percpu_counter_init(&sbi->s_freeclusters_counter, block,
+-				  GFP_KERNEL);
+-	if (!err) {
+-		unsigned long freei = ext4_count_free_inodes(sb);
+-		sbi->s_es->s_free_inodes_count = cpu_to_le32(freei);
+-		err = percpu_counter_init(&sbi->s_freeinodes_counter, freei,
+-					  GFP_KERNEL);
+-	}
+-	if (!err)
+-		err = percpu_counter_init(&sbi->s_dirs_counter,
+-					  ext4_count_dirs(sb), GFP_KERNEL);
+-	if (!err)
+-		err = percpu_counter_init(&sbi->s_dirtyclusters_counter, 0,
+-					  GFP_KERNEL);
+-	if (!err)
+-		err = percpu_counter_init(&sbi->s_sra_exceeded_retry_limit, 0,
+-					  GFP_KERNEL);
+-	if (!err)
+-		err = percpu_init_rwsem(&sbi->s_writepages_rwsem);
+-
+-	if (err) {
+-		ext4_msg(sb, KERN_ERR, "insufficient memory");
++	if (ext4_percpu_param_init(sbi))
+ 		goto failed_mount6;
+-	}
+ 
+ 	if (ext4_has_feature_flex_bg(sb))
+ 		if (!ext4_fill_flex_info(sb)) {
+@@ -5571,12 +5609,7 @@ failed_mount9: __maybe_unused
+ 		kvfree(flex_groups);
+ 	}
+ 	rcu_read_unlock();
+-	percpu_counter_destroy(&sbi->s_freeclusters_counter);
+-	percpu_counter_destroy(&sbi->s_freeinodes_counter);
+-	percpu_counter_destroy(&sbi->s_dirs_counter);
+-	percpu_counter_destroy(&sbi->s_dirtyclusters_counter);
+-	percpu_counter_destroy(&sbi->s_sra_exceeded_retry_limit);
+-	percpu_free_rwsem(&sbi->s_writepages_rwsem);
++	ext4_percpu_param_destroy(sbi);
+ failed_mount5:
+ 	ext4_ext_release(sb);
+ 	ext4_release_system_zone(sb);
+diff --git a/fs/ext4/xattr.c b/fs/ext4/xattr.c
+index 95dbc7c9843b..8e84c2ccdee8 100644
+--- a/fs/ext4/xattr.c
++++ b/fs/ext4/xattr.c
+@@ -1127,7 +1127,7 @@ ext4_xattr_inode_dec_ref_all(handle_t *handle, struct inode *parent,
+ {
+ 	struct inode *ea_inode;
+ 	struct ext4_xattr_entry *entry;
+-	struct ext4_iloc iloc;
++	struct ext4_iloc iloc = { .bh = NULL };
+ 	bool dirty = false;
+ 	unsigned int ea_ino;
+ 	int err;
+@@ -1137,7 +1137,11 @@ ext4_xattr_inode_dec_ref_all(handle_t *handle, struct inode *parent,
+ 	if (block_csum)
+ 		end = (void *)bh->b_data + bh->b_size;
+ 	else {
+-		ext4_get_inode_loc(parent, &iloc);
++		err = ext4_get_inode_loc(parent, &iloc);
++		if (err) {
++			EXT4_ERROR_INODE(parent, "parent inode loc (error %d)", err);
++			return;
++		}
+ 		end = (void *)ext4_raw_inode(&iloc) + EXT4_SB(parent->i_sb)->s_inode_size;
+ 	}
+ 
+@@ -1218,6 +1222,8 @@ ext4_xattr_inode_dec_ref_all(handle_t *handle, struct inode *parent,
+ 			ext4_warning_inode(parent,
+ 					   "handle dirty metadata err=%d", err);
+ 	}
++
++	brelse(iloc.bh);
+ }
+ 
+ /*
+diff --git a/include/crypto/scatterwalk.h b/include/crypto/scatterwalk.h
+index ccdb05f68a75..92ecd4ffbd07 100644
+--- a/include/crypto/scatterwalk.h
++++ b/include/crypto/scatterwalk.h
+@@ -83,6 +83,34 @@ static inline void scatterwalk_pagedone(struct scatter_walk *walk, int out,
+ 		scatterwalk_start(walk, sg_next(walk->sg));
+ }
+ 
++/*
++ * Flush the dcache of any pages that overlap the region
++ * [offset, offset + nbytes) relative to base_page.
++ *
++ * This should be called only when ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE, to ensure
++ * that all relevant code (including the call to sg_page() in the caller, if
++ * applicable) gets fully optimized out when !ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE.
++ */
++static inline void __scatterwalk_flush_dcache_pages(struct page *base_page,
++						    unsigned int offset,
++						    unsigned int nbytes)
++{
++	unsigned int num_pages;
++
++	base_page += offset / PAGE_SIZE;
++	offset %= PAGE_SIZE;
++
++	/*
++	 * This is an overflow-safe version of
++	 * num_pages = DIV_ROUND_UP(offset + nbytes, PAGE_SIZE).
++	 */
++	num_pages = nbytes / PAGE_SIZE;
++	num_pages += DIV_ROUND_UP(offset + (nbytes % PAGE_SIZE), PAGE_SIZE);
++
++	for (unsigned int i = 0; i < num_pages; i++)
++		flush_dcache_page(base_page + i);
++}
++
+ static inline void scatterwalk_done(struct scatter_walk *walk, int out,
+ 				    int more)
+ {
+@@ -95,6 +123,9 @@ void scatterwalk_copychunks(void *buf, struct scatter_walk *walk,
+ 			    size_t nbytes, int out);
+ void *scatterwalk_map(struct scatter_walk *walk);
+ 
++void memcpy_sglist(struct scatterlist *dst, struct scatterlist *src,
++		   unsigned int nbytes);
++
+ void scatterwalk_map_and_copy(void *buf, struct scatterlist *sg,
+ 			      unsigned int start, unsigned int nbytes, int out);
+ 
+diff --git a/kernel/bpf/btf.c b/kernel/bpf/btf.c
+index a5c64552b399..c67f32f49c92 100644
+--- a/kernel/bpf/btf.c
++++ b/kernel/bpf/btf.c
+@@ -1620,7 +1620,16 @@ static void btf_free_id(struct btf *btf)
+ 	 * of the _bh() version.
+ 	 */
+ 	spin_lock_irqsave(&btf_idr_lock, flags);
+-	idr_remove(&btf_idr, btf->id);
++	if (btf->id) {
++		idr_remove(&btf_idr, btf->id);
++		/*
++		 * Clear the id here to make this function idempotent, since it will get
++		 * called a couple of times for module BTFs: on module unload, and then
++		 * the final btf_put(). btf_alloc_id() starts IDs with 1, so we can use
++		 * 0 as sentinel value.
++		 */
++		WRITE_ONCE(btf->id, 0);
++	}
+ 	spin_unlock_irqrestore(&btf_idr_lock, flags);
+ }
+ 
+@@ -6889,7 +6898,7 @@ static void bpf_btf_show_fdinfo(struct seq_file *m, struct file *filp)
+ {
+ 	const struct btf *btf = filp->private_data;
+ 
+-	seq_printf(m, "btf_id:\t%u\n", btf->id);
++	seq_printf(m, "btf_id:\t%u\n", READ_ONCE(btf->id));
+ }
+ #endif
+ 
+@@ -6984,7 +6993,7 @@ int btf_get_info_by_fd(const struct btf *btf,
+ 	if (copy_from_user(&info, uinfo, info_copy))
+ 		return -EFAULT;
+ 
+-	info.id = btf->id;
++	info.id = READ_ONCE(btf->id);
+ 	ubtf = u64_to_user_ptr(info.btf);
+ 	btf_copy = min_t(u32, btf->data_size, info.btf_size);
+ 	if (copy_to_user(ubtf, btf->data, btf_copy))
+@@ -7047,7 +7056,7 @@ int btf_get_fd_by_id(u32 id)
+ 
+ u32 btf_obj_id(const struct btf *btf)
+ {
+-	return btf->id;
++	return READ_ONCE(btf->id);
+ }
+ 
+ bool btf_is_kernel(const struct btf *btf)
+@@ -7196,6 +7205,13 @@ static int btf_module_notify(struct notifier_block *nb, unsigned long op,
+ 			if (btf_mod->module != module)
+ 				continue;
+ 
++			/*
++			 * For modules, we do the freeing of BTF IDR as soon as
++			 * module goes away to disable BTF discovery, since the
++			 * btf_try_get_module() on such BTFs will fail. This may
++			 * be called again on btf_put(), but it's ok to do so.
++			 */
++			btf_free_id(btf_mod->btf);
+ 			list_del(&btf_mod->list);
+ 			if (btf_mod->sysfs_attr)
+ 				sysfs_remove_bin_file(btf_kobj, btf_mod->sysfs_attr);
+diff --git a/kernel/bpf/cgroup.c b/kernel/bpf/cgroup.c
+index 2cb04e0e118d..8e04caa19794 100644
+--- a/kernel/bpf/cgroup.c
++++ b/kernel/bpf/cgroup.c
+@@ -1745,7 +1745,7 @@ int __cgroup_bpf_run_filter_sysctl(struct ctl_table_header *head,
+ 	kfree(ctx.cur_val);
+ 
+ 	if (ret == 1 && ctx.new_updated) {
+-		kfree(*buf);
++		kvfree(*buf);
+ 		*buf = ctx.new_val;
+ 		*pcount = ctx.new_len;
+ 	} else {
+@@ -2384,22 +2384,22 @@ static bool cg_sockopt_is_valid_access(int off, int size,
+ 	}
+ 
+ 	switch (off) {
+-	case offsetof(struct bpf_sockopt, sk):
++	case bpf_ctx_range_ptr(struct bpf_sockopt, sk):
+ 		if (size != sizeof(__u64))
+ 			return false;
+ 		info->reg_type = PTR_TO_SOCKET;
+ 		break;
+-	case offsetof(struct bpf_sockopt, optval):
++	case bpf_ctx_range_ptr(struct bpf_sockopt, optval):
+ 		if (size != sizeof(__u64))
+ 			return false;
+ 		info->reg_type = PTR_TO_PACKET;
+ 		break;
+-	case offsetof(struct bpf_sockopt, optval_end):
++	case bpf_ctx_range_ptr(struct bpf_sockopt, optval_end):
+ 		if (size != sizeof(__u64))
+ 			return false;
+ 		info->reg_type = PTR_TO_PACKET_END;
+ 		break;
+-	case offsetof(struct bpf_sockopt, retval):
++	case bpf_ctx_range(struct bpf_sockopt, retval):
+ 		if (size != size_default)
+ 			return false;
+ 		return prog->expected_attach_type == BPF_CGROUP_GETSOCKOPT;
+diff --git a/kernel/bpf/devmap.c b/kernel/bpf/devmap.c
+index ac1d5dbc8918..5e05732db236 100644
+--- a/kernel/bpf/devmap.c
++++ b/kernel/bpf/devmap.c
+@@ -571,18 +571,22 @@ static inline bool is_ifindex_excluded(int *excluded, int num_excluded, int ifin
+ }
+ 
+ /* Get ifindex of each upper device. 'indexes' must be able to hold at
+- * least MAX_NEST_DEV elements.
+- * Returns the number of ifindexes added.
++ * least 'max' elements.
++ * Returns the number of ifindexes added, or -EOVERFLOW if there are too
++ * many upper devices.
+  */
+-static int get_upper_ifindexes(struct net_device *dev, int *indexes)
++static int get_upper_ifindexes(struct net_device *dev, int *indexes, int max)
+ {
+ 	struct net_device *upper;
+ 	struct list_head *iter;
+ 	int n = 0;
+ 
+ 	netdev_for_each_upper_dev_rcu(dev, upper, iter) {
++		if (n >= max)
++			return -EOVERFLOW;
+ 		indexes[n++] = upper->ifindex;
+ 	}
++
+ 	return n;
+ }
+ 
+@@ -598,7 +602,11 @@ int dev_map_enqueue_multi(struct xdp_frame *xdpf, struct net_device *dev_rx,
+ 	int err;
+ 
+ 	if (exclude_ingress) {
+-		num_excluded = get_upper_ifindexes(dev_rx, excluded_devices);
++		num_excluded = get_upper_ifindexes(dev_rx, excluded_devices,
++						   ARRAY_SIZE(excluded_devices) - 1);
++		if (num_excluded < 0)
++			return num_excluded;
++
+ 		excluded_devices[num_excluded++] = dev_rx->ifindex;
+ 	}
+ 
+@@ -716,7 +724,11 @@ int dev_map_redirect_multi(struct net_device *dev, struct sk_buff *skb,
+ 	int err;
+ 
+ 	if (exclude_ingress) {
+-		num_excluded = get_upper_ifindexes(dev, excluded_devices);
++		num_excluded = get_upper_ifindexes(dev, excluded_devices,
++						   ARRAY_SIZE(excluded_devices) - 1);
++		if (num_excluded < 0)
++			return num_excluded;
++
+ 		excluded_devices[num_excluded++] = dev->ifindex;
+ 	}
+ 
+diff --git a/kernel/bpf/helpers.c b/kernel/bpf/helpers.c
+index a3fc4e2e8256..025a31d223c3 100644
+--- a/kernel/bpf/helpers.c
++++ b/kernel/bpf/helpers.c
+@@ -837,7 +837,13 @@ int bpf_bprintf_prepare(char *fmt, u32 fmt_size, const u64 *raw_args,
+ 		data->buf = buffers->buf;
+ 
+ 	for (i = 0; i < fmt_size; i++) {
+-		if ((!isprint(fmt[i]) && !isspace(fmt[i])) || !isascii(fmt[i])) {
++		unsigned char c = fmt[i];
++
++		/*
++		 * Permit bytes >= 0x80 in plain text so UTF-8 literals can pass
++		 * through unchanged, while still rejecting ASCII control bytes.
++		 */
++		if (isascii(c) && !isprint(c) && !isspace(c)) {
+ 			err = -EINVAL;
+ 			goto out;
+ 		}
+@@ -859,6 +865,15 @@ int bpf_bprintf_prepare(char *fmt, u32 fmt_size, const u64 *raw_args,
+ 		 * always access fmt[i + 1], in the worst case it will be a 0
+ 		 */
+ 		i++;
++		c = fmt[i];
++		/*
++		 * The format parser below only understands ASCII conversion
++		 * specifiers and modifiers, so reject non-ASCII after '%'.
++		 */
++		if (!isascii(c)) {
++			err = -EINVAL;
++			goto out;
++		}
+ 
+ 		/* skip optional "[0 +-][num]" width formatting field */
+ 		while (fmt[i] == '0' || fmt[i] == '+'  || fmt[i] == '-' ||
+diff --git a/kernel/bpf/local_storage.c b/kernel/bpf/local_storage.c
+index f01ca6f1ee03..acf4649f7e47 100644
+--- a/kernel/bpf/local_storage.c
++++ b/kernel/bpf/local_storage.c
+@@ -259,7 +259,7 @@ static int cgroup_storage_get_next_key(struct bpf_map *_map, void *key,
+ 			goto enoent;
+ 
+ 		storage = list_next_entry(storage, list_map);
+-		if (!storage)
++		if (list_entry_is_head(storage, &map->list, list_map))
+ 			goto enoent;
+ 	} else {
+ 		storage = list_first_entry(&map->list,
+diff --git a/kernel/bpf/ringbuf.c b/kernel/bpf/ringbuf.c
+index 31e9dff8a974..ede6cdafa389 100644
+--- a/kernel/bpf/ringbuf.c
++++ b/kernel/bpf/ringbuf.c
+@@ -218,6 +218,8 @@ static struct bpf_map *ringbuf_map_alloc(union bpf_attr *attr)
+ 
+ static void bpf_ringbuf_free(struct bpf_ringbuf *rb)
+ {
++	irq_work_sync(&rb->work);
++
+ 	/* copy pages pointer and nr_pages to local variable, as we are going
+ 	 * to unmap rb itself with vunmap() below
+ 	 */
+diff --git a/kernel/bpf/trampoline.c b/kernel/bpf/trampoline.c
+index 82d32b7f99ed..5b5b98da4784 100644
+--- a/kernel/bpf/trampoline.c
++++ b/kernel/bpf/trampoline.c
+@@ -735,10 +735,8 @@ int bpf_trampoline_link_cgroup_shim(struct bpf_prog *prog,
+ 	mutex_lock(&tr->mutex);
+ 
+ 	shim_link = cgroup_shim_find(tr, bpf_func);
+-	if (shim_link) {
++	if (shim_link && !IS_ERR(bpf_link_inc_not_zero(&shim_link->link.link))) {
+ 		/* Reusing existing shim attached by the other program. */
+-		bpf_link_inc(&shim_link->link.link);
+-
+ 		mutex_unlock(&tr->mutex);
+ 		bpf_trampoline_put(tr); /* bpf_trampoline_get above */
+ 		return 0;
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+index a4f3ea6c5f37..2c335ffa29e6 100644
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -5122,7 +5122,8 @@ static int check_mem_access(struct bpf_verifier_env *env, int insn_idx, u32 regn
+ 	} else if (reg->type == CONST_PTR_TO_MAP) {
+ 		err = check_ptr_to_map_access(env, regs, regno, off, size, t,
+ 					      value_regno);
+-	} else if (base_type(reg->type) == PTR_TO_BUF) {
++	} else if (base_type(reg->type) == PTR_TO_BUF &&
++		   !type_may_be_null(reg->type)) {
+ 		bool rdonly_mem = type_is_rdonly_mem(reg->type);
+ 		u32 *max_access;
+ 
+@@ -9073,21 +9074,17 @@ static void __scalar64_min_max_lsh(struct bpf_reg_state *dst_reg,
+ 				   u64 umin_val, u64 umax_val)
+ {
+ 	/* Special case <<32 because it is a common compiler pattern to sign
+-	 * extend subreg by doing <<32 s>>32. In this case if 32bit bounds are
+-	 * positive we know this shift will also be positive so we can track
+-	 * bounds correctly. Otherwise we lose all sign bit information except
+-	 * what we can pick up from var_off. Perhaps we can generalize this
+-	 * later to shifts of any length.
++	 * extend subreg by doing <<32 s>>32. smin/smax assignments are correct
++	 * because s32 bounds don't flip sign when shifting to the left by
++	 * 32bits.
+ 	 */
+-	if (umin_val == 32 && umax_val == 32 && dst_reg->s32_max_value >= 0)
++	if (umin_val == 32 && umax_val == 32) {
+ 		dst_reg->smax_value = (s64)dst_reg->s32_max_value << 32;
+-	else
+-		dst_reg->smax_value = S64_MAX;
+-
+-	if (umin_val == 32 && umax_val == 32 && dst_reg->s32_min_value >= 0)
+ 		dst_reg->smin_value = (s64)dst_reg->s32_min_value << 32;
+-	else
++	} else {
++		dst_reg->smax_value = S64_MAX;
+ 		dst_reg->smin_value = S64_MIN;
++	}
+ 
+ 	/* If we might shift our top bit out, then we know nothing */
+ 	if (dst_reg->umax_value > 1ULL << (63 - umax_val)) {
+@@ -10030,6 +10027,10 @@ static void reg_set_min_max(struct bpf_reg_state *true_reg,
+ 		}
+ 		break;
+ 	case BPF_JSET:
++		/* Forget the ranges before narrowing tnums, to avoid invariant
++		 * violations if we're on a dead branch.
++		 */
++		__mark_reg_unbounded(false_reg);
+ 		if (is_jmp32) {
+ 			false_32off = tnum_and(false_32off, tnum_const(~val32));
+ 			if (is_power_of_2(val32))
+@@ -11828,8 +11829,13 @@ static bool regsafe(struct bpf_verifier_env *env, struct bpf_reg_state *rold,
+ 		 * since someone could have accessed through (ptr - k), or
+ 		 * even done ptr -= k in a register, to get a safe access.
+ 		 */
+-		if (rold->range > rcur->range)
++		if (rold->range < 0 || rcur->range < 0) {
++			/* special case for [BEYOND|AT]_PKT_END */
++			if (rold->range != rcur->range)
++				return false;
++		} else if (rold->range > rcur->range) {
+ 			return false;
++		}
+ 		/* If the offsets don't match, we can't trust our alignment;
+ 		 * nor can we be sure that we won't fall out of range.
+ 		 */
+diff --git a/net/bpf/test_run.c b/net/bpf/test_run.c
+index 77b386b76d46..26cee0151d4c 100644
+--- a/net/bpf/test_run.c
++++ b/net/bpf/test_run.c
+@@ -1047,6 +1047,11 @@ static int convert___skb_to_skb(struct sk_buff *skb, struct __sk_buff *__skb)
+ 
+ 	if (__skb->gso_segs > GSO_MAX_SEGS)
+ 		return -EINVAL;
++
++	/* Currently GSO type is zero/unset. If this gets extended with
++	 * a small list of accepted GSO types in future, the filter for
++	 * an unset GSO type in bpf_clone_redirect() can be lifted.
++	 */
+ 	skb_shinfo(skb)->gso_segs = __skb->gso_segs;
+ 	skb_shinfo(skb)->gso_size = __skb->gso_size;
+ 	skb_shinfo(skb)->hwtstamps.hwtstamp = __skb->hwtstamp;
+@@ -1154,19 +1159,23 @@ int bpf_prog_test_run_skb(struct bpf_prog *prog, const union bpf_attr *kattr,
+ 
+ 	switch (skb->protocol) {
+ 	case htons(ETH_P_IP):
+-		sk->sk_family = AF_INET;
+-		if (sizeof(struct iphdr) <= skb_headlen(skb)) {
+-			sk->sk_rcv_saddr = ip_hdr(skb)->saddr;
+-			sk->sk_daddr = ip_hdr(skb)->daddr;
++		if (skb_headlen(skb) < sizeof(struct iphdr)) {
++			ret = -EINVAL;
++			goto out;
+ 		}
++		sk->sk_family = AF_INET;
++		sk->sk_rcv_saddr = ip_hdr(skb)->saddr;
++		sk->sk_daddr = ip_hdr(skb)->daddr;
+ 		break;
+ #if IS_ENABLED(CONFIG_IPV6)
+ 	case htons(ETH_P_IPV6):
+-		sk->sk_family = AF_INET6;
+-		if (sizeof(struct ipv6hdr) <= skb_headlen(skb)) {
+-			sk->sk_v6_rcv_saddr = ipv6_hdr(skb)->saddr;
+-			sk->sk_v6_daddr = ipv6_hdr(skb)->daddr;
++		if (skb_headlen(skb) < sizeof(struct ipv6hdr)) {
++			ret = -EINVAL;
++			goto out;
+ 		}
++		sk->sk_family = AF_INET6;
++		sk->sk_v6_rcv_saddr = ipv6_hdr(skb)->saddr;
++		sk->sk_v6_daddr = ipv6_hdr(skb)->daddr;
+ 		break;
+ #endif
+ 	default:
+@@ -1322,7 +1331,7 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
+ 		headroom -= ctx->data;
+ 	}
+ 
+-	max_data_sz = 4096 - headroom - tailroom;
++	max_data_sz = PAGE_SIZE - headroom - tailroom;
+ 	if (size > max_data_sz) {
+ 		/* disallow live data mode for jumbo frames */
+ 		if (do_live)
+@@ -1356,13 +1365,13 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
+ 
+ 			if (sinfo->nr_frags == MAX_SKB_FRAGS) {
+ 				ret = -ENOMEM;
+-				goto out;
++				goto out_put_dev;
+ 			}
+ 
+ 			page = alloc_page(GFP_KERNEL);
+ 			if (!page) {
+ 				ret = -ENOMEM;
+-				goto out;
++				goto out_put_dev;
+ 			}
+ 
+ 			frag = &sinfo->frags[sinfo->nr_frags++];
+@@ -1375,7 +1384,7 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
+ 			if (copy_from_user(page_address(page), data_in + size,
+ 					   data_len)) {
+ 				ret = -EFAULT;
+-				goto out;
++				goto out_put_dev;
+ 			}
+ 			sinfo->xdp_frags_size += data_len;
+ 			size += data_len;
+@@ -1390,6 +1399,7 @@ int bpf_prog_test_run_xdp(struct bpf_prog *prog, const union bpf_attr *kattr,
+ 		ret = bpf_test_run_xdp_live(prog, &xdp, repeat, batch_size, &duration);
+ 	else
+ 		ret = bpf_test_run(prog, &xdp, repeat, &retval, &duration, true);
++out_put_dev:
+ 	/* We convert the xdp_buff back to an xdp_md before checking the return
+ 	 * code so the reference count of any held netdevice will be decremented
+ 	 * even if the test run failed.
+diff --git a/net/bridge/netfilter/ebtables.c b/net/bridge/netfilter/ebtables.c
+index ed62c1026fe9..f99e348c8f37 100644
+--- a/net/bridge/netfilter/ebtables.c
++++ b/net/bridge/netfilter/ebtables.c
+@@ -1299,7 +1299,7 @@ int ebt_register_template(const struct ebt_table *t, int (*table_init)(struct ne
+ 	list_for_each_entry(tmpl, &template_tables, list) {
+ 		if (WARN_ON_ONCE(strcmp(t->name, tmpl->name) == 0)) {
+ 			mutex_unlock(&ebt_mutex);
+-			return -EEXIST;
++			return -EBUSY;
+ 		}
+ 	}
+ 
+diff --git a/net/core/filter.c b/net/core/filter.c
+index 237af340972f..e56f741524e8 100644
+--- a/net/core/filter.c
++++ b/net/core/filter.c
+@@ -493,7 +493,7 @@ static bool convert_bpf_ld_abs(struct sock_filter *fp, struct bpf_insn **insnp)
+ 	    ((unaligned_ok && offset >= 0) ||
+ 	     (!unaligned_ok && offset >= 0 &&
+ 	      offset + ip_align >= 0 &&
+-	      offset + ip_align % size == 0))) {
++	      (offset + ip_align) % size == 0))) {
+ 		bool ldx_off_ok = offset <= S16_MAX;
+ 
+ 		*insn++ = BPF_MOV64_REG(BPF_REG_TMP, BPF_REG_H);
+@@ -1643,15 +1643,24 @@ int sk_reuseport_attach_bpf(u32 ufd, struct sock *sk)
+ 	return err;
+ }
+ 
++static void sk_reuseport_prog_free_rcu(struct rcu_head *rcu)
++{
++	struct bpf_prog_aux *aux = container_of(rcu, struct bpf_prog_aux, rcu);
++	struct bpf_prog *prog = aux->prog;
++
++	bpf_release_orig_filter(prog);
++	bpf_prog_free(prog);
++}
++
+ void sk_reuseport_prog_free(struct bpf_prog *prog)
+ {
+ 	if (!prog)
+ 		return;
+ 
+-	if (prog->type == BPF_PROG_TYPE_SK_REUSEPORT)
+-		bpf_prog_put(prog);
++	if (bpf_prog_was_classic(prog))
++		call_rcu(&prog->aux->rcu, sk_reuseport_prog_free_rcu);
+ 	else
+-		bpf_prog_destroy(prog);
++		bpf_prog_put(prog);
+ }
+ 
+ struct bpf_scratchpad {
+@@ -2441,6 +2450,13 @@ BPF_CALL_3(bpf_clone_redirect, struct sk_buff *, skb, u32, ifindex, u64, flags)
+ 	if (unlikely(flags & (~(BPF_F_INGRESS) | BPF_F_REDIRECT_INTERNAL)))
+ 		return -EINVAL;
+ 
++	/* BPF test infra's convert___skb_to_skb() can create type-less
++	 * GSO packets. gso_features_check() will detect this as a bad
++	 * offload. However, lets not leak them out in the first place.
++	 */
++	if (unlikely(skb_is_gso(skb) && !skb_shinfo(skb)->gso_type))
++		return -EBADMSG;
++
+ 	dev = dev_get_by_index_rcu(dev_net(skb->dev), ifindex);
+ 	if (unlikely(!dev))
+ 		return -EINVAL;
+@@ -2830,7 +2846,7 @@ BPF_CALL_4(bpf_msg_push_data, struct sk_msg *, msg, u32, start,
+ 
+ 		psge->length = start - offset;
+ 		rsge.length -= psge->length;
+-		rsge.offset += start;
++		rsge.offset += start - offset;
+ 
+ 		sk_msg_iter_var_next(i);
+ 		sg_unmark_end(psge);
+@@ -4058,7 +4074,7 @@ static const struct bpf_func_proto bpf_xdp_store_bytes_proto = {
+ 	.ret_type	= RET_INTEGER,
+ 	.arg1_type	= ARG_PTR_TO_CTX,
+ 	.arg2_type	= ARG_ANYTHING,
+-	.arg3_type	= ARG_PTR_TO_UNINIT_MEM,
++	.arg3_type	= ARG_PTR_TO_MEM | MEM_RDONLY,
+ 	.arg4_type	= ARG_CONST_SIZE,
+ };
+ 
+@@ -6201,9 +6217,12 @@ BPF_CALL_5(bpf_skb_check_mtu, struct sk_buff *, skb,
+ 	 */
+ 	if (skb_is_gso(skb)) {
+ 		ret = BPF_MTU_CHK_RET_SUCCESS;
+-		if (flags & BPF_MTU_CHK_SEGS &&
+-		    !skb_gso_validate_network_len(skb, mtu))
+-			ret = BPF_MTU_CHK_RET_SEGS_TOOBIG;
++		if (flags & BPF_MTU_CHK_SEGS) {
++			if (!skb_transport_header_was_set(skb))
++				return -EINVAL;
++			if (!skb_gso_validate_network_len(skb, mtu))
++				ret = BPF_MTU_CHK_RET_SEGS_TOOBIG;
++		}
+ 	}
+ out:
+ 	*mtu_len = mtu;
+@@ -8505,7 +8524,7 @@ static bool bpf_skb_is_valid_access(int off, int size, enum bpf_access_type type
+ 		if (size != sizeof(__u64))
+ 			return false;
+ 		break;
+-	case offsetof(struct __sk_buff, sk):
++	case bpf_ctx_range_ptr(struct __sk_buff, sk):
+ 		if (type == BPF_WRITE || size != sizeof(__u64))
+ 			return false;
+ 		info->reg_type = PTR_TO_SOCK_COMMON_OR_NULL;
+@@ -9089,7 +9108,7 @@ static bool sock_addr_is_valid_access(int off, int size,
+ 				return false;
+ 		}
+ 		break;
+-	case offsetof(struct bpf_sock_addr, sk):
++	case bpf_ctx_range_ptr(struct bpf_sock_addr, sk):
+ 		if (type != BPF_READ)
+ 			return false;
+ 		if (size != sizeof(__u64))
+@@ -9139,17 +9158,17 @@ static bool sock_ops_is_valid_access(int off, int size,
+ 			if (size != sizeof(__u64))
+ 				return false;
+ 			break;
+-		case offsetof(struct bpf_sock_ops, sk):
++		case bpf_ctx_range_ptr(struct bpf_sock_ops, sk):
+ 			if (size != sizeof(__u64))
+ 				return false;
+ 			info->reg_type = PTR_TO_SOCKET_OR_NULL;
+ 			break;
+-		case offsetof(struct bpf_sock_ops, skb_data):
++		case bpf_ctx_range_ptr(struct bpf_sock_ops, skb_data):
+ 			if (size != sizeof(__u64))
+ 				return false;
+ 			info->reg_type = PTR_TO_PACKET;
+ 			break;
+-		case offsetof(struct bpf_sock_ops, skb_data_end):
++		case bpf_ctx_range_ptr(struct bpf_sock_ops, skb_data_end):
+ 			if (size != sizeof(__u64))
+ 				return false;
+ 			info->reg_type = PTR_TO_PACKET_END;
+@@ -9224,17 +9243,17 @@ static bool sk_msg_is_valid_access(int off, int size,
+ 		return false;
+ 
+ 	switch (off) {
+-	case offsetof(struct sk_msg_md, data):
++	case bpf_ctx_range_ptr(struct sk_msg_md, data):
+ 		info->reg_type = PTR_TO_PACKET;
+ 		if (size != sizeof(__u64))
+ 			return false;
+ 		break;
+-	case offsetof(struct sk_msg_md, data_end):
++	case bpf_ctx_range_ptr(struct sk_msg_md, data_end):
+ 		info->reg_type = PTR_TO_PACKET_END;
+ 		if (size != sizeof(__u64))
+ 			return false;
+ 		break;
+-	case offsetof(struct sk_msg_md, sk):
++	case bpf_ctx_range_ptr(struct sk_msg_md, sk):
+ 		if (size != sizeof(__u64))
+ 			return false;
+ 		info->reg_type = PTR_TO_SOCKET;
+@@ -11420,7 +11439,7 @@ static bool sk_lookup_is_valid_access(int off, int size,
+ 		return false;
+ 
+ 	switch (off) {
+-	case offsetof(struct bpf_sk_lookup, sk):
++	case bpf_ctx_range_ptr(struct bpf_sk_lookup, sk):
+ 		info->reg_type = PTR_TO_SOCKET_OR_NULL;
+ 		return size == sizeof(__u64);
+ 
+diff --git a/net/core/sock.c b/net/core/sock.c
+index 4e9e4c9b3357..ad95acadf668 100644
+--- a/net/core/sock.c
++++ b/net/core/sock.c
+@@ -1296,6 +1296,11 @@ int sk_setsockopt(struct sock *sk, int level, int optname,
+ 	case SO_ATTACH_FILTER: {
+ 		struct sock_fprog fprog;
+ 
++		if (sk_is_tcp(sk) &&
++		    !sockopt_ns_capable(sock_net(sk)->user_ns, CAP_NET_ADMIN)) {
++			ret = -EPERM;
++			break;
++		}
+ 		ret = copy_bpf_fprog_from_user(&fprog, optval, optlen);
+ 		if (!ret)
+ 			ret = sk_attach_filter(&fprog, sk);
+diff --git a/net/ipv4/fib_trie.c b/net/ipv4/fib_trie.c
+index a9a2acc1d1f6..e3385b877eae 100644
+--- a/net/ipv4/fib_trie.c
++++ b/net/ipv4/fib_trie.c
+@@ -2058,10 +2058,11 @@ int fib_table_flush(struct net *net, struct fib_table *tb, bool flush_all)
+ 				continue;
+ 			}
+ 
+-			/* Do not flush error routes if network namespace is
+-			 * not being dismantled
++			/* When not flushing the entire table, skip error
++			 * routes that are not marked for deletion.
+ 			 */
+-			if (!flush_all && fib_props[fa->fa_type].error) {
++			if (!flush_all && fib_props[fa->fa_type].error &&
++			    !(fi->fib_flags & RTNH_F_DEAD)) {
+ 				slen = fa->fa_slen;
+ 				continue;
+ 			}
+diff --git a/net/ipv4/icmp.c b/net/ipv4/icmp.c
+index d4bc3a8cbd7b..2cdacc1d85f8 100644
+--- a/net/ipv4/icmp.c
++++ b/net/ipv4/icmp.c
+@@ -64,6 +64,7 @@
+ #include <linux/jiffies.h>
+ #include <linux/kernel.h>
+ #include <linux/fcntl.h>
++#include <linux/nospec.h>
+ #include <linux/socket.h>
+ #include <linux/in.h>
+ #include <linux/inet.h>
+@@ -357,7 +358,9 @@ static int icmp_glue_bits(void *from, char *to, int offset, int len, int odd,
+ 				      to, len);
+ 
+ 	skb->csum = csum_block_add(skb->csum, csum, odd);
+-	if (icmp_pointers[icmp_param->data.icmph.type].error)
++	if (icmp_param->data.icmph.type <= NR_ICMP_TYPES &&
++	    icmp_pointers[array_index_nospec(icmp_param->data.icmph.type,
++					     NR_ICMP_TYPES + 1)].error)
+ 		nf_ct_attach(skb, icmp_param->skb);
+ 	return 0;
+ }
+@@ -1106,6 +1109,13 @@ bool icmp_build_probe(struct sk_buff *skb, struct icmphdr *icmphdr)
+ 			if (iio->ident.addr.ctype3_hdr.addrlen != sizeof(struct in6_addr))
+ 				goto send_mal_query;
+ 			dev = ipv6_stub->ipv6_dev_find(net, &iio->ident.addr.ip_addr.ipv6_addr, dev);
++			/*
++			 * If IPv6 identifier lookup is unavailable, silently
++			 * discard the request instead of misreporting NO_IF.
++			 */
++			if (IS_ERR(dev))
++				return false;
++
+ 			dev_hold(dev);
+ 			break;
+ #endif
+diff --git a/net/ipv4/inet_connection_sock.c b/net/ipv4/inet_connection_sock.c
+index 965db6eb044f..4de6c6b3465b 100644
+--- a/net/ipv4/inet_connection_sock.c
++++ b/net/ipv4/inet_connection_sock.c
+@@ -157,8 +157,11 @@ static bool inet_use_bhash2_on_bind(const struct sock *sk)
+ 	if (sk->sk_family == AF_INET6) {
+ 		int addr_type = ipv6_addr_type(&sk->sk_v6_rcv_saddr);
+ 
+-		return addr_type != IPV6_ADDR_ANY &&
+-			addr_type != IPV6_ADDR_MAPPED;
++		if (addr_type == IPV6_ADDR_ANY)
++			return false;
++
++		if (addr_type != IPV6_ADDR_MAPPED)
++			return true;
+ 	}
+ #endif
+ 	return sk->sk_rcv_saddr != htonl(INADDR_ANY);
+@@ -198,8 +201,15 @@ static bool __inet_bhash2_conflict(const struct sock *sk, struct sock *sk2,
+ 				   kuid_t sk_uid, bool relax,
+ 				   bool reuseport_cb_ok, bool reuseport_ok)
+ {
+-	if (sk->sk_family == AF_INET && ipv6_only_sock(sk2))
+-		return false;
++	if (ipv6_only_sock(sk2)) {
++		if (sk->sk_family == AF_INET)
++			return false;
++
++#if IS_ENABLED(CONFIG_IPV6)
++		if (ipv6_addr_v4mapped(&sk->sk_v6_rcv_saddr))
++			return false;
++#endif
++	}
+ 
+ 	return inet_bind_conflict(sk, sk2, sk_uid, relax,
+ 				  reuseport_cb_ok, reuseport_ok);
+@@ -237,9 +247,10 @@ static int inet_csk_bind_conflict(const struct sock *sk,
+ 				  const struct inet_bind2_bucket *tb2, /* may be null */
+ 				  bool relax, bool reuseport_ok)
+ {
+-	bool reuseport_cb_ok;
+-	struct sock_reuseport *reuseport_cb;
+ 	kuid_t uid = sock_i_uid((struct sock *)sk);
++	struct sock_reuseport *reuseport_cb;
++	bool reuseport_cb_ok;
++	struct sock *sk2;
+ 
+ 	rcu_read_lock();
+ 	reuseport_cb = rcu_dereference(sk->sk_reuseport_cb);
+@@ -247,32 +258,29 @@ static int inet_csk_bind_conflict(const struct sock *sk,
+ 	reuseport_cb_ok = !reuseport_cb || READ_ONCE(reuseport_cb->num_closed_socks);
+ 	rcu_read_unlock();
+ 
+-	/*
+-	 * Unlike other sk lookup places we do not check
++	/* Conflicts with an existing IPV6_ADDR_ANY (if ipv6) or INADDR_ANY (if
++	 * ipv4) should have been checked already. We need to do these two
++	 * checks separately because their spinlocks have to be acquired/released
++	 * independently of each other, to prevent possible deadlocks
++	 */
++	if (inet_use_bhash2_on_bind(sk))
++		return tb2 && inet_bhash2_conflict(sk, tb2, uid, relax,
++						   reuseport_cb_ok, reuseport_ok);
++
++	/* Unlike other sk lookup places we do not check
+ 	 * for sk_net here, since _all_ the socks listed
+ 	 * in tb->owners and tb2->owners list belong
+ 	 * to the same net - the one this bucket belongs to.
+ 	 */
++	sk_for_each_bound(sk2, &tb->owners) {
++		if (!inet_bind_conflict(sk, sk2, uid, relax, reuseport_cb_ok, reuseport_ok))
++			continue;
+ 
+-	if (!inet_use_bhash2_on_bind(sk)) {
+-		struct sock *sk2;
+-
+-		sk_for_each_bound(sk2, &tb->owners)
+-			if (inet_bind_conflict(sk, sk2, uid, relax,
+-					       reuseport_cb_ok, reuseport_ok) &&
+-			    inet_rcv_saddr_equal(sk, sk2, true))
+-				return true;
+-
+-		return false;
++		if (inet_rcv_saddr_equal(sk, sk2, true))
++			return true;
+ 	}
+ 
+-	/* Conflicts with an existing IPV6_ADDR_ANY (if ipv6) or INADDR_ANY (if
+-	 * ipv4) should have been checked already. We need to do these two
+-	 * checks separately because their spinlocks have to be acquired/released
+-	 * independently of each other, to prevent possible deadlocks
+-	 */
+-	return tb2 && inet_bhash2_conflict(sk, tb2, uid, relax, reuseport_cb_ok,
+-					   reuseport_ok);
++	return false;
+ }
+ 
+ /* Determine if there is a bind conflict with an existing IPV6_ADDR_ANY (if ipv6) or
+@@ -1120,7 +1128,7 @@ static void reqsk_timer_handler(struct timer_list *t)
+ 	}
+ 
+ drop:
+-	__inet_csk_reqsk_queue_drop(sk_listener, oreq, true);
++	__inet_csk_reqsk_queue_drop(oreq->rsk_listener, oreq, true);
+ 	reqsk_put(oreq);
+ }
+ 
+@@ -1438,16 +1446,19 @@ void inet_csk_listen_stop(struct sock *sk)
+ 			if (nreq) {
+ 				refcount_set(&nreq->rsk_refcnt, 1);
+ 
++				rcu_read_lock();
+ 				if (inet_csk_reqsk_queue_add(nsk, nreq, child)) {
+ 					__NET_INC_STATS(sock_net(nsk),
+ 							LINUX_MIB_TCPMIGRATEREQSUCCESS);
+ 					reqsk_migrate_reset(req);
++					READ_ONCE(nsk->sk_data_ready)(nsk);
+ 				} else {
+ 					__NET_INC_STATS(sock_net(nsk),
+ 							LINUX_MIB_TCPMIGRATEREQFAILURE);
+ 					reqsk_migrate_reset(nreq);
+ 					__reqsk_free(nreq);
+ 				}
++				rcu_read_unlock();
+ 
+ 				/* inet_csk_reqsk_queue_add() has already
+ 				 * called inet_child_forget() on failure case.
+diff --git a/net/ipv4/inet_hashtables.c b/net/ipv4/inet_hashtables.c
+index 5e7cdcebd64f..6f46cc0d1cb6 100644
+--- a/net/ipv4/inet_hashtables.c
++++ b/net/ipv4/inet_hashtables.c
+@@ -828,7 +828,8 @@ bool inet_bind2_bucket_match_addr_any(const struct inet_bind2_bucket *tb, const
+ 			return ipv6_addr_any(&tb->v6_rcv_saddr) ||
+ 				ipv6_addr_v4mapped_any(&tb->v6_rcv_saddr);
+ 
+-		return false;
++		return ipv6_addr_v4mapped(&sk->sk_v6_rcv_saddr) &&
++			tb->rcv_saddr == 0;
+ 	}
+ 
+ 	if (sk->sk_family == AF_INET6)
+diff --git a/net/ipv4/ip_gre.c b/net/ipv4/ip_gre.c
+index 2c311ed84a3b..b90241aff93c 100644
+--- a/net/ipv4/ip_gre.c
++++ b/net/ipv4/ip_gre.c
+@@ -854,10 +854,17 @@ static int ipgre_header(struct sk_buff *skb, struct net_device *dev,
+ 			const void *daddr, const void *saddr, unsigned int len)
+ {
+ 	struct ip_tunnel *t = netdev_priv(dev);
+-	struct iphdr *iph;
+ 	struct gre_base_hdr *greh;
++	struct iphdr *iph;
++	int needed;
++
++	needed = t->hlen + sizeof(*iph);
++	if (skb_headroom(skb) < needed &&
++	    pskb_expand_head(skb, HH_DATA_ALIGN(needed - skb_headroom(skb)),
++			     0, GFP_ATOMIC))
++		return -needed;
+ 
+-	iph = skb_push(skb, t->hlen + sizeof(*iph));
++	iph = skb_push(skb, needed);
+ 	greh = (struct gre_base_hdr *)(iph+1);
+ 	greh->flags = gre_tnl_flags_to_gre_flags(t->parms.o_flags);
+ 	greh->protocol = htons(type);
+diff --git a/net/ipv4/ip_options.c b/net/ipv4/ip_options.c
+index b4c59708fc09..95d3c39ac072 100644
+--- a/net/ipv4/ip_options.c
++++ b/net/ipv4/ip_options.c
+@@ -530,6 +530,10 @@ int ip_options_get(struct net *net, struct ip_options_rcu **optp,
+ 		kfree(opt);
+ 		return -EINVAL;
+ 	}
++	if (opt->opt.srr && !ns_capable(net->user_ns, CAP_NET_RAW)) {
++		kfree(opt);
++		return -EPERM;
++	}
+ 	kfree(*optp);
+ 	*optp = opt;
+ 	return 0;
+diff --git a/net/ipv4/netfilter/arp_tables.c b/net/ipv4/netfilter/arp_tables.c
+index 14365b20f1c5..c6d8ef261d7c 100755
+--- a/net/ipv4/netfilter/arp_tables.c
++++ b/net/ipv4/netfilter/arp_tables.c
+@@ -690,14 +690,12 @@ static int copy_entries_to_user(unsigned int total_size,
+ 		const struct xt_entry_target *t;
+ 
+ 		e = loc_cpu_entry + off;
+-		if (copy_to_user(userptr + off, e, sizeof(*e))) {
+-			ret = -EFAULT;
+-			goto free_counters;
+-		}
+-		if (copy_to_user(userptr + off
++		if (copy_to_user(userptr + off, e,
++				 offsetof(struct arpt_entry, counters)) ||
++		    copy_to_user(userptr + off
+ 				 + offsetof(struct arpt_entry, counters),
+ 				 &counters[num],
+-				 sizeof(counters[num])) != 0) {
++				 sizeof(counters[num]))) {
+ 			ret = -EFAULT;
+ 			goto free_counters;
+ 		}
+@@ -1315,9 +1313,8 @@ static int compat_copy_entry_to_user(struct arpt_entry *e, void __user **dstptr,
+ 
+ 	origsize = *size;
+ 	ce = *dstptr;
+-	if (copy_to_user(ce, e, sizeof(struct arpt_entry)) != 0 ||
+-	    copy_to_user(&ce->counters, &counters[i],
+-	    sizeof(counters[i])) != 0)
++	if (copy_to_user(ce, e, offsetof(struct compat_arpt_entry, counters)) ||
++	    copy_to_user(&ce->counters, &counters[i], sizeof(counters[i])))
+ 		return -EFAULT;
+ 
+ 	*dstptr += sizeof(struct compat_arpt_entry);
+diff --git a/net/ipv4/netfilter/ip_tables.c b/net/ipv4/netfilter/ip_tables.c
+index a6208efcfccf..055d5e28a44f 100644
+--- a/net/ipv4/netfilter/ip_tables.c
++++ b/net/ipv4/netfilter/ip_tables.c
+@@ -834,14 +834,12 @@ copy_entries_to_user(unsigned int total_size,
+ 		const struct xt_entry_target *t;
+ 
+ 		e = loc_cpu_entry + off;
+-		if (copy_to_user(userptr + off, e, sizeof(*e))) {
+-			ret = -EFAULT;
+-			goto free_counters;
+-		}
+-		if (copy_to_user(userptr + off
++		if (copy_to_user(userptr + off, e,
++				 offsetof(struct ipt_entry, counters)) ||
++		    copy_to_user(userptr + off
+ 				 + offsetof(struct ipt_entry, counters),
+ 				 &counters[num],
+-				 sizeof(counters[num])) != 0) {
++				 sizeof(counters[num]))) {
+ 			ret = -EFAULT;
+ 			goto free_counters;
+ 		}
+@@ -1230,9 +1228,8 @@ compat_copy_entry_to_user(struct ipt_entry *e, void __user **dstptr,
+ 
+ 	origsize = *size;
+ 	ce = *dstptr;
+-	if (copy_to_user(ce, e, sizeof(struct ipt_entry)) != 0 ||
+-	    copy_to_user(&ce->counters, &counters[i],
+-	    sizeof(counters[i])) != 0)
++	if (copy_to_user(ce, e, offsetof(struct compat_ipt_entry, counters)) ||
++	    copy_to_user(&ce->counters, &counters[i], sizeof(counters[i])))
+ 		return -EFAULT;
+ 
+ 	*dstptr += sizeof(struct compat_ipt_entry);
+diff --git a/net/ipv4/netfilter/nf_reject_ipv4.c b/net/ipv4/netfilter/nf_reject_ipv4.c
+index 675b5bbed638..64600ad4a019 100644
+--- a/net/ipv4/netfilter/nf_reject_ipv4.c
++++ b/net/ipv4/netfilter/nf_reject_ipv4.c
+@@ -71,6 +71,27 @@ struct sk_buff *nf_reject_skb_v4_tcp_reset(struct net *net,
+ }
+ EXPORT_SYMBOL_GPL(nf_reject_skb_v4_tcp_reset);
+ 
++static bool nf_skb_is_icmp_unreach(const struct sk_buff *skb)
++{
++	const struct iphdr *iph = ip_hdr(skb);
++	u8 *tp, _type;
++	int thoff;
++
++	if (iph->protocol != IPPROTO_ICMP)
++		return false;
++
++	thoff = skb_network_offset(skb) + sizeof(*iph);
++
++	tp = skb_header_pointer(skb,
++				thoff + offsetof(struct icmphdr, type),
++				sizeof(_type), &_type);
++
++	if (!tp)
++		return false;
++
++	return *tp == ICMP_DEST_UNREACH;
++}
++
+ struct sk_buff *nf_reject_skb_v4_unreach(struct net *net,
+ 					 struct sk_buff *oldskb,
+ 					 const struct net_device *dev,
+@@ -91,6 +112,10 @@ struct sk_buff *nf_reject_skb_v4_unreach(struct net *net,
+ 	if (ip_hdr(oldskb)->frag_off & htons(IP_OFFSET))
+ 		return NULL;
+ 
++	/* don't reply to ICMP_DEST_UNREACH with ICMP_DEST_UNREACH. */
++	if (nf_skb_is_icmp_unreach(oldskb))
++		return NULL;
++
+ 	/* RFC says return as much as we can without exceeding 576 bytes. */
+ 	len = min_t(unsigned int, 536, oldskb->len);
+ 
+diff --git a/net/ipv4/raw.c b/net/ipv4/raw.c
+index c109bc376cc5..1fcc4426361d 100644
+--- a/net/ipv4/raw.c
++++ b/net/ipv4/raw.c
+@@ -381,7 +381,7 @@ static int raw_send_hdrinc(struct sock *sk, struct flowi4 *fl4,
+ 	 * in, reject the frame as invalid
+ 	 */
+ 	err = -EINVAL;
+-	if (iphlen > length)
++	if (iphlen > length || iphlen < sizeof(*iph))
+ 		goto error_free;
+ 
+ 	if (iphlen >= sizeof(*iph)) {
+diff --git a/net/ipv4/route.c b/net/ipv4/route.c
+index b661958ba63c..eee7f2bd2abc 100644
+--- a/net/ipv4/route.c
++++ b/net/ipv4/route.c
+@@ -613,6 +613,11 @@ static void fnhe_remove_oldest(struct fnhe_hash_bucket *hash)
+ 			oldest_p = fnhe_p;
+ 		}
+ 	}
++
++	/* Clear oldest->fnhe_daddr to prevent this fnhe from being
++	 * rebound with new dsts in rt_bind_exception().
++	 */
++	oldest->fnhe_daddr = 0;
+ 	fnhe_flush_routes(oldest);
+ 	*oldest_p = oldest->fnhe_next;
+ 	kfree_rcu(oldest, rcu);
+diff --git a/net/ipv4/sysctl_net_ipv4.c b/net/ipv4/sysctl_net_ipv4.c
+index f68762ce4d8a..414daa208585 100644
+--- a/net/ipv4/sysctl_net_ipv4.c
++++ b/net/ipv4/sysctl_net_ipv4.c
+@@ -1440,10 +1440,10 @@ static __net_exit void ipv4_sysctl_exit_net(struct net *net)
+ {
+ 	struct ctl_table *table;
+ 
+-	kfree(net->ipv4.sysctl_local_reserved_ports);
+ 	table = net->ipv4.ipv4_hdr->ctl_table_arg;
+ 	unregister_net_sysctl_table(net->ipv4.ipv4_hdr);
+ 	kfree(table);
++	kfree(net->ipv4.sysctl_local_reserved_ports);
+ }
+ 
+ static __net_initdata struct pernet_operations ipv4_sysctl_ops = {
+diff --git a/net/ipv4/tcp.c b/net/ipv4/tcp.c
+index 3b8e31f456c1..4dbed30c21f6 100644
+--- a/net/ipv4/tcp.c
++++ b/net/ipv4/tcp.c
+@@ -467,6 +467,9 @@ static void tcp_tx_timestamp(struct sock *sk, u16 tsflags)
+ {
+ 	struct sk_buff *skb = tcp_write_queue_tail(sk);
+ 
++	if (unlikely(!skb))
++		skb = skb_rb_last(&sk->tcp_rtx_queue);
++
+ 	if (tsflags && skb) {
+ 		struct skb_shared_info *shinfo = skb_shinfo(skb);
+ 		struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
+@@ -4091,7 +4094,8 @@ struct sk_buff *tcp_get_timestamping_opt_stats(const struct sock *sk,
+ 	nla_put_u32(stats, TCP_NLA_SRTT, tp->srtt_us >> 3);
+ 	nla_put_u16(stats, TCP_NLA_TIMEOUT_REHASH, tp->timeout_rehash);
+ 	nla_put_u32(stats, TCP_NLA_BYTES_NOTSENT,
+-		    max_t(int, 0, tp->write_seq - tp->snd_nxt));
++		    max_t(int, 0,
++			  READ_ONCE(tp->write_seq) - READ_ONCE(tp->snd_nxt)));
+ 	nla_put_u64_64bit(stats, TCP_NLA_EDT, orig_skb->skb_mstamp_ns,
+ 			  TCP_NLA_PAD);
+ 	if (ack_skb)
+diff --git a/net/ipv6/addrconf.c b/net/ipv6/addrconf.c
+index 2036fb1159db..9be2efd03546 100644
+--- a/net/ipv6/addrconf.c
++++ b/net/ipv6/addrconf.c
+@@ -3091,12 +3091,12 @@ static int inet6_addr_del(struct net *net, int ifindex, u32 ifa_flags,
+ 			in6_ifa_hold(ifp);
+ 			read_unlock_bh(&idev->lock);
+ 
+-			ipv6_del_addr(ifp);
+-
+ 			if (!(ifp->flags & IFA_F_TEMPORARY) &&
+ 			    (ifp->flags & IFA_F_MANAGETEMPADDR))
+ 				delete_tempaddrs(idev, ifp);
+ 
++			ipv6_del_addr(ifp);
++
+ 			addrconf_verify_rtnl(net);
+ 			if (ipv6_addr_is_multicast(pfx)) {
+ 				ipv6_mc_config(net->ipv6.mc_autojoin_sk,
+@@ -3594,12 +3594,12 @@ static void addrconf_permanent_addr(struct net *net, struct net_device *dev)
+ 		if ((ifp->flags & IFA_F_PERMANENT) &&
+ 		    fixup_permanent_addr(net, idev, ifp) < 0) {
+ 			write_unlock_bh(&idev->lock);
+-			in6_ifa_hold(ifp);
+-			ipv6_del_addr(ifp);
+-			write_lock_bh(&idev->lock);
+ 
+ 			net_info_ratelimited("%s: Failed to add prefix route for address %pI6c; dropping\n",
+ 					     idev->dev->name, &ifp->addr);
++			in6_ifa_hold(ifp);
++			ipv6_del_addr(ifp);
++			write_lock_bh(&idev->lock);
+ 		}
+ 	}
+ 
+@@ -7105,7 +7105,9 @@ static const struct ctl_table addrconf_sysctl[] = {
+ 		.data		= &ipv6_devconf.rpl_seg_enabled,
+ 		.maxlen		= sizeof(int),
+ 		.mode		= 0644,
+-		.proc_handler	= proc_dointvec,
++		.proc_handler   = proc_dointvec_minmax,
++		.extra1         = SYSCTL_ZERO,
++		.extra2         = SYSCTL_ONE,
+ 	},
+ 	{
+ 		.procname	= "ioam6_enabled",
+diff --git a/net/ipv6/datagram.c b/net/ipv6/datagram.c
+index e70ace403bbd..e758afe146d3 100644
+--- a/net/ipv6/datagram.c
++++ b/net/ipv6/datagram.c
+@@ -616,6 +616,18 @@ void ip6_datagram_recv_common_ctl(struct sock *sk, struct msghdr *msg,
+ 	}
+ }
+ 
++static u16 ipv6_get_exthdr_len(const struct sk_buff *skb, const u8 *ptr)
++{
++	u16 len;
++
++	if (ptr + 2 > skb_tail_pointer(skb))
++		return 0;
++
++	len = (ptr[1] + 1) << 3;
++
++	return (len <= skb_tail_pointer(skb) - ptr) ? len : 0;
++}
++
+ void ip6_datagram_recv_specific_ctl(struct sock *sk, struct msghdr *msg,
+ 				    struct sk_buff *skb)
+ {
+@@ -642,7 +654,10 @@ void ip6_datagram_recv_specific_ctl(struct sock *sk, struct msghdr *msg,
+ 	/* HbH is allowed only once */
+ 	if (np->rxopt.bits.hopopts && (opt->flags & IP6SKB_HOPBYHOP)) {
+ 		u8 *ptr = nh + sizeof(struct ipv6hdr);
+-		put_cmsg(msg, SOL_IPV6, IPV6_HOPOPTS, (ptr[1]+1)<<3, ptr);
++		u16 len = ipv6_get_exthdr_len(skb, ptr);
++
++		if (len)
++			put_cmsg(msg, SOL_IPV6, IPV6_HOPOPTS, len, ptr);
+ 	}
+ 
+ 	if (opt->lastopt &&
+@@ -663,26 +678,37 @@ void ip6_datagram_recv_specific_ctl(struct sock *sk, struct msghdr *msg,
+ 			unsigned int len;
+ 			u8 *ptr = nh + off;
+ 
++			if (ptr + 2 > skb_tail_pointer(skb))
++				return;
++
+ 			switch (nexthdr) {
+ 			case IPPROTO_DSTOPTS:
+ 				nexthdr = ptr[0];
+-				len = (ptr[1] + 1) << 3;
++				len = ipv6_get_exthdr_len(skb, ptr);
++				if (!len)
++					return;
+ 				if (np->rxopt.bits.dstopts)
+ 					put_cmsg(msg, SOL_IPV6, IPV6_DSTOPTS, len, ptr);
+ 				break;
+ 			case IPPROTO_ROUTING:
+ 				nexthdr = ptr[0];
+-				len = (ptr[1] + 1) << 3;
++				len = ipv6_get_exthdr_len(skb, ptr);
++				if (!len)
++					return;
+ 				if (np->rxopt.bits.srcrt)
+ 					put_cmsg(msg, SOL_IPV6, IPV6_RTHDR, len, ptr);
+ 				break;
+ 			case IPPROTO_AH:
+ 				nexthdr = ptr[0];
+ 				len = (ptr[1] + 2) << 2;
++				if (ptr + len > skb_tail_pointer(skb))
++					return;
+ 				break;
+ 			default:
+ 				nexthdr = ptr[0];
+-				len = (ptr[1] + 1) << 3;
++				len = ipv6_get_exthdr_len(skb, ptr);
++				if (!len)
++					return;
+ 				break;
+ 			}
+ 
+@@ -704,19 +730,31 @@ void ip6_datagram_recv_specific_ctl(struct sock *sk, struct msghdr *msg,
+ 	}
+ 	if (np->rxopt.bits.ohopopts && (opt->flags & IP6SKB_HOPBYHOP)) {
+ 		u8 *ptr = nh + sizeof(struct ipv6hdr);
+-		put_cmsg(msg, SOL_IPV6, IPV6_2292HOPOPTS, (ptr[1]+1)<<3, ptr);
++		u16 len = ipv6_get_exthdr_len(skb, ptr);
++
++		if (len)
++			put_cmsg(msg, SOL_IPV6, IPV6_2292HOPOPTS, len, ptr);
+ 	}
+ 	if (np->rxopt.bits.odstopts && opt->dst0) {
+ 		u8 *ptr = nh + opt->dst0;
+-		put_cmsg(msg, SOL_IPV6, IPV6_2292DSTOPTS, (ptr[1]+1)<<3, ptr);
++		u16 len = ipv6_get_exthdr_len(skb, ptr);
++
++		if (len)
++			put_cmsg(msg, SOL_IPV6, IPV6_2292DSTOPTS, len, ptr);
+ 	}
+ 	if (np->rxopt.bits.osrcrt && opt->srcrt) {
+ 		struct ipv6_rt_hdr *rthdr = (struct ipv6_rt_hdr *)(nh + opt->srcrt);
+-		put_cmsg(msg, SOL_IPV6, IPV6_2292RTHDR, (rthdr->hdrlen+1) << 3, rthdr);
++		u16 len = ipv6_get_exthdr_len(skb, (u8 *)rthdr);
++
++		if (len)
++			put_cmsg(msg, SOL_IPV6, IPV6_2292RTHDR, len, rthdr);
+ 	}
+ 	if (np->rxopt.bits.odstopts && opt->dst1) {
+ 		u8 *ptr = nh + opt->dst1;
+-		put_cmsg(msg, SOL_IPV6, IPV6_2292DSTOPTS, (ptr[1]+1)<<3, ptr);
++		u16 len = ipv6_get_exthdr_len(skb, ptr);
++
++		if (len)
++			put_cmsg(msg, SOL_IPV6, IPV6_2292DSTOPTS, len, ptr);
+ 	}
+ 	if (np->rxopt.bits.rxorigdstaddr) {
+ 		struct sockaddr_in6 sin6;
+@@ -761,6 +799,7 @@ int ip6_datagram_send_ctl(struct net *net, struct sock *sk,
+ {
+ 	struct in6_pktinfo *src_info;
+ 	struct cmsghdr *cmsg;
++	struct ipv6_rt_hdr *orthdr;
+ 	struct ipv6_rt_hdr *rthdr;
+ 	struct ipv6_opt_hdr *hdr;
+ 	struct ipv6_txoptions *opt = ipc6->opt;
+@@ -922,9 +961,13 @@ int ip6_datagram_send_ctl(struct net *net, struct sock *sk,
+ 				goto exit_f;
+ 			}
+ 			if (cmsg->cmsg_type == IPV6_DSTOPTS) {
++				if (opt->dst1opt)
++					opt->opt_flen -= ipv6_optlen(opt->dst1opt);
+ 				opt->opt_flen += len;
+ 				opt->dst1opt = hdr;
+ 			} else {
++				if (opt->dst0opt)
++					opt->opt_nflen -= ipv6_optlen(opt->dst0opt);
+ 				opt->opt_nflen += len;
+ 				opt->dst0opt = hdr;
+ 			}
+@@ -967,12 +1010,17 @@ int ip6_datagram_send_ctl(struct net *net, struct sock *sk,
+ 				goto exit_f;
+ 			}
+ 
++			orthdr = opt->srcrt;
++			if (orthdr)
++				opt->opt_nflen -= ((orthdr->hdrlen + 1) << 3);
+ 			opt->opt_nflen += len;
+ 			opt->srcrt = rthdr;
+ 
+ 			if (cmsg->cmsg_type == IPV6_2292RTHDR && opt->dst1opt) {
+ 				int dsthdrlen = ((opt->dst1opt->hdrlen+1)<<3);
+ 
++				if (opt->dst0opt)
++					opt->opt_nflen -= ipv6_optlen(opt->dst0opt);
+ 				opt->opt_nflen += dsthdrlen;
+ 				opt->dst0opt = opt->dst1opt;
+ 				opt->dst1opt = NULL;
+diff --git a/net/ipv6/exthdrs.c b/net/ipv6/exthdrs.c
+index 1cfdd9d95012..5eae844ae689 100644
+--- a/net/ipv6/exthdrs.c
++++ b/net/ipv6/exthdrs.c
+@@ -186,6 +186,8 @@ static bool ip6_parse_tlv(bool hopbyhop,
+ 				case IPV6_TLV_JUMBO:
+ 					if (!ipv6_hop_jumbo(skb, off))
+ 						return false;
++
++					nh = skb_network_header(skb);
+ 					break;
+ 				case IPV6_TLV_CALIPSO:
+ 					if (!ipv6_hop_calipso(skb, off))
+@@ -203,6 +205,8 @@ static bool ip6_parse_tlv(bool hopbyhop,
+ 				case IPV6_TLV_HAO:
+ 					if (!ipv6_dest_hao(skb, off))
+ 						return false;
++
++					nh = skb_network_header(skb);
+ 					break;
+ #endif
+ 				default:
+@@ -316,7 +320,7 @@ static int ipv6_destopt_rcv(struct sk_buff *skb)
+ 	}
+ 
+ 	extlen = (skb_transport_header(skb)[1] + 1) << 3;
+-	if (extlen > net->ipv6.sysctl.max_dst_opts_len)
++	if (extlen > READ_ONCE(net->ipv6.sysctl.max_dst_opts_len))
+ 		goto fail_and_free;
+ 
+ 	opt->lastopt = opt->dst1 = skb_network_header_len(skb);
+@@ -324,7 +328,8 @@ static int ipv6_destopt_rcv(struct sk_buff *skb)
+ 	dstbuf = opt->dst1;
+ #endif
+ 
+-	if (ip6_parse_tlv(false, skb, net->ipv6.sysctl.max_dst_opts_cnt)) {
++	if (ip6_parse_tlv(false, skb,
++			  READ_ONCE(net->ipv6.sysctl.max_dst_opts_cnt))) {
+ 		skb->transport_header += extlen;
+ 		opt = IP6CB(skb);
+ #if IS_ENABLED(CONFIG_IPV6_MIP6)
+@@ -380,6 +385,10 @@ static int ipv6_srh_rcv(struct sk_buff *skb)
+ 	hdr = (struct ipv6_sr_hdr *)skb_transport_header(skb);
+ 
+ 	idev = __in6_dev_get(skb->dev);
++	if (!idev) {
++		kfree_skb(skb);
++		return -1;
++	}
+ 
+ 	accept_seg6 = net->ipv6.devconf_all->seg6_enabled;
+ 	if (accept_seg6 > idev->cnf.seg6_enabled)
+@@ -495,6 +504,7 @@ static int ipv6_rpl_srh_rcv(struct sk_buff *skb)
+ 	struct net *net = dev_net(skb->dev);
+ 	struct inet6_dev *idev;
+ 	struct ipv6hdr *oldhdr;
++	unsigned int chdr_len;
+ 	unsigned char *buf;
+ 	int accept_rpl_seg;
+ 	int i, err;
+@@ -558,7 +568,7 @@ static int ipv6_rpl_srh_rcv(struct sk_buff *skb)
+ 	 * unsigned char which is segments_left field. Should not be
+ 	 * higher than that.
+ 	 */
+-	if (r || (n + 1) > 255) {
++	if (r || (n + 1) > 127) {
+ 		kfree_skb(skb);
+ 		return -1;
+ 	}
+@@ -614,8 +624,10 @@ static int ipv6_rpl_srh_rcv(struct sk_buff *skb)
+ 	skb_pull(skb, ((hdr->hdrlen + 1) << 3));
+ 	skb_postpull_rcsum(skb, oldhdr,
+ 			   sizeof(struct ipv6hdr) + ((hdr->hdrlen + 1) << 3));
+-	if (unlikely(!hdr->segments_left)) {
+-		if (pskb_expand_head(skb, sizeof(struct ipv6hdr) + ((chdr->hdrlen + 1) << 3), 0,
++	chdr_len = sizeof(struct ipv6hdr) + ((chdr->hdrlen + 1) << 3);
++	if (unlikely(!hdr->segments_left ||
++		     skb_headroom(skb) < chdr_len + skb->mac_len)) {
++		if (pskb_expand_head(skb, chdr_len + skb->mac_len, 0,
+ 				     GFP_ATOMIC)) {
+ 			__IP6_INC_STATS(net, ip6_dst_idev(skb_dst(skb)), IPSTATS_MIB_OUTDISCARDS);
+ 			kfree_skb(skb);
+@@ -625,7 +637,7 @@ static int ipv6_rpl_srh_rcv(struct sk_buff *skb)
+ 
+ 		oldhdr = ipv6_hdr(skb);
+ 	}
+-	skb_push(skb, ((chdr->hdrlen + 1) << 3) + sizeof(struct ipv6hdr));
++	skb_push(skb, chdr_len);
+ 	skb_reset_network_header(skb);
+ 	skb_mac_header_rebuild(skb);
+ 	skb_set_transport_header(skb, sizeof(struct ipv6hdr));
+@@ -940,16 +952,27 @@ static bool ipv6_hop_ra(struct sk_buff *skb, int optoff)
+ 
+ static bool ipv6_hop_ioam(struct sk_buff *skb, int optoff)
+ {
++	enum skb_drop_reason drop_reason;
+ 	struct ioam6_trace_hdr *trace;
+ 	struct ioam6_namespace *ns;
++	struct inet6_dev *idev;
+ 	struct ioam6_hdr *hdr;
+ 
++	drop_reason = SKB_DROP_REASON_IP_INHDR;
++
+ 	/* Bad alignment (must be 4n-aligned) */
+ 	if (optoff & 3)
+ 		goto drop;
+ 
++	/* Does the device still have IPv6 configuration? */
++	idev = __in6_dev_get(skb->dev);
++	if (!idev) {
++		drop_reason = SKB_DROP_REASON_IPV6DISABLED;
++		goto drop;
++	}
++
+ 	/* Ignore if IOAM is not enabled on ingress */
+-	if (!__in6_dev_get(skb->dev)->cnf.ioam6_enabled)
++	if (!idev->cnf.ioam6_enabled)
+ 		goto ignore;
+ 
+ 	/* Truncated Option header */
+@@ -994,7 +1017,7 @@ static bool ipv6_hop_ioam(struct sk_buff *skb, int optoff)
+ 	return true;
+ 
+ drop:
+-	kfree_skb_reason(skb, SKB_DROP_REASON_IP_INHDR);
++	kfree_skb_reason(skb, drop_reason);
+ 	return false;
+ }
+ 
+@@ -1084,11 +1107,12 @@ int ipv6_parse_hopopts(struct sk_buff *skb)
+ 	}
+ 
+ 	extlen = (skb_transport_header(skb)[1] + 1) << 3;
+-	if (extlen > net->ipv6.sysctl.max_hbh_opts_len)
++	if (extlen > READ_ONCE(net->ipv6.sysctl.max_hbh_opts_len))
+ 		goto fail_and_free;
+ 
+ 	opt->flags |= IP6SKB_HOPBYHOP;
+-	if (ip6_parse_tlv(true, skb, net->ipv6.sysctl.max_hbh_opts_cnt)) {
++	if (ip6_parse_tlv(true, skb,
++			  READ_ONCE(net->ipv6.sysctl.max_hbh_opts_cnt))) {
+ 		skb->transport_header += extlen;
+ 		opt = IP6CB(skb);
+ 		opt->nhoff = sizeof(struct ipv6hdr);
+diff --git a/net/ipv6/icmp.c b/net/ipv6/icmp.c
+index 6e2c6b08be9c..6af36573dc04 100644
+--- a/net/ipv6/icmp.c
++++ b/net/ipv6/icmp.c
+@@ -667,6 +667,9 @@ int ip6_err_gen_icmpv6_unreach(struct sk_buff *skb, int nhs, int type,
+ 	if (!skb2)
+ 		return 1;
+ 
++	/* Remove debris left by IPv4 stack. */
++	memset(IP6CB(skb2), 0, sizeof(*IP6CB(skb2)));
++
+ 	skb_dst_drop(skb2);
+ 	skb_pull(skb2, nhs);
+ 	skb_reset_network_header(skb2);
+@@ -754,7 +757,9 @@ static void icmpv6_echo_reply(struct sk_buff *skb)
+ 	fl6.daddr = ipv6_hdr(skb)->saddr;
+ 	if (saddr)
+ 		fl6.saddr = *saddr;
+-	fl6.flowi6_oif = icmp6_iif(skb);
++	fl6.flowi6_oif = ipv6_addr_loopback(&fl6.daddr) ?
++			 skb->dev->ifindex :
++			 icmp6_iif(skb);
+ 	fl6.fl6_icmp_type = type;
+ 	fl6.flowi6_mark = mark;
+ 	fl6.flowi6_uid = sock_net_uid(net, NULL);
+@@ -872,7 +877,6 @@ static int icmpv6_rcv(struct sk_buff *skb)
+ 	struct net *net = dev_net(skb->dev);
+ 	struct net_device *dev = icmp6_dev(skb);
+ 	struct inet6_dev *idev = __in6_dev_get(dev);
+-	const struct in6_addr *saddr, *daddr;
+ 	struct icmp6hdr *hdr;
+ 	u8 type;
+ 
+@@ -903,12 +907,10 @@ static int icmpv6_rcv(struct sk_buff *skb)
+ 
+ 	__ICMP6_INC_STATS(dev_net(dev), idev, ICMP6_MIB_INMSGS);
+ 
+-	saddr = &ipv6_hdr(skb)->saddr;
+-	daddr = &ipv6_hdr(skb)->daddr;
+-
+ 	if (skb_checksum_validate(skb, IPPROTO_ICMPV6, ip6_compute_pseudo)) {
+ 		net_dbg_ratelimited("ICMPv6 checksum failed [%pI6c > %pI6c]\n",
+-				    saddr, daddr);
++				    &ipv6_hdr(skb)->saddr,
++				    &ipv6_hdr(skb)->daddr);
+ 		goto csum_error;
+ 	}
+ 
+@@ -990,7 +992,8 @@ static int icmpv6_rcv(struct sk_buff *skb)
+ 			break;
+ 
+ 		net_dbg_ratelimited("icmpv6: msg of unknown type [%pI6c > %pI6c]\n",
+-				    saddr, daddr);
++				    &ipv6_hdr(skb)->saddr,
++				    &ipv6_hdr(skb)->daddr);
+ 
+ 		/*
+ 		 * error of unknown type.
+diff --git a/net/ipv6/ip6_output.c b/net/ipv6/ip6_output.c
+index f7a225da8525..a2c3c6abaa3b 100644
+--- a/net/ipv6/ip6_output.c
++++ b/net/ipv6/ip6_output.c
+@@ -258,35 +258,36 @@ bool ip6_autoflowlabel(struct net *net, const struct ipv6_pinfo *np)
+ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
+ 	     __u32 mark, struct ipv6_txoptions *opt, int tclass, u32 priority)
+ {
+-	struct net *net = sock_net(sk);
+ 	const struct ipv6_pinfo *np = inet6_sk(sk);
+ 	struct in6_addr *first_hop = &fl6->daddr;
+ 	struct dst_entry *dst = skb_dst(skb);
+-	struct net_device *dev = dst->dev;
+ 	struct inet6_dev *idev = ip6_dst_idev(dst);
+ 	struct hop_jumbo_hdr *hop_jumbo;
+ 	int hoplen = sizeof(*hop_jumbo);
++	struct net *net = sock_net(sk);
+ 	unsigned int head_room;
++	struct net_device *dev;
+ 	struct ipv6hdr *hdr;
+ 	u8  proto = fl6->flowi6_proto;
+ 	int seg_len = skb->len;
+-	int hlimit = -1;
++	int ret, hlimit = -1;
+ 	u32 mtu;
+ 
++	rcu_read_lock();
++
++	dev = dst_dev_rcu(dst);
+ 	head_room = sizeof(struct ipv6hdr) + hoplen + LL_RESERVED_SPACE(dev);
+ 	if (opt)
+ 		head_room += opt->opt_nflen + opt->opt_flen;
+ 
+ 	if (unlikely(head_room > skb_headroom(skb))) {
+-		/* Make sure idev stays alive */
+-		rcu_read_lock();
++		/* idev stays alive while we hold rcu_read_lock(). */
+ 		skb = skb_expand_head(skb, head_room);
+ 		if (!skb) {
+ 			IP6_INC_STATS(net, idev, IPSTATS_MIB_OUTDISCARDS);
+-			rcu_read_unlock();
+-			return -ENOBUFS;
++			ret = -ENOBUFS;
++			goto unlock;
+ 		}
+-		rcu_read_unlock();
+ 	}
+ 
+ 	if (opt) {
+@@ -348,17 +349,21 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
+ 		 * skb to its handler for processing
+ 		 */
+ 		skb = l3mdev_ip6_out((struct sock *)sk, skb);
+-		if (unlikely(!skb))
+-			return 0;
++		if (unlikely(!skb)) {
++			ret = 0;
++			goto unlock;
++		}
+ 
+ 		/* hooks should never assume socket lock is held.
+ 		 * we promote our socket to non const
+ 		 */
+-		return NF_HOOK(NFPROTO_IPV6, NF_INET_LOCAL_OUT,
+-			       net, (struct sock *)sk, skb, NULL, dev,
+-			       dst_output);
++		ret = NF_HOOK(NFPROTO_IPV6, NF_INET_LOCAL_OUT,
++			      net, (struct sock *)sk, skb, NULL, dev,
++			      dst_output);
++		goto unlock;
+ 	}
+ 
++	ret = -EMSGSIZE;
+ 	skb->dev = dev;
+ 	/* ipv6_local_error() does not require socket lock,
+ 	 * we promote our socket to non const
+@@ -367,7 +372,9 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
+ 
+ 	IP6_INC_STATS(net, idev, IPSTATS_MIB_FRAGFAILS);
+ 	kfree_skb(skb);
+-	return -EMSGSIZE;
++unlock:
++	rcu_read_unlock();
++	return ret;
+ }
+ EXPORT_SYMBOL(ip6_xmit);
+ 
+@@ -1683,8 +1690,8 @@ static int __ip6_append_data(struct sock *sk,
+ 				  !(rt->dst.dev->features & NETIF_F_SG)))
+ 				alloclen = fraglen;
+ 			else {
+-				alloclen = fragheaderlen + transhdrlen;
+-				pagedlen = datalen - transhdrlen;
++				alloclen = fragheaderlen + transhdrlen + fraggap;
++				pagedlen = datalen - transhdrlen - fraggap;
+ 			}
+ 			alloclen += alloc_extra;
+ 
+diff --git a/net/ipv6/mcast.c b/net/ipv6/mcast.c
+index a1b3f3e7921f..140d174a6f3d 100644
+--- a/net/ipv6/mcast.c
++++ b/net/ipv6/mcast.c
+@@ -1393,9 +1393,9 @@ void igmp6_event_query(struct sk_buff *skb)
+ static void __mld_query_work(struct sk_buff *skb)
+ {
+ 	struct mld2_query *mlh2 = NULL;
+-	const struct in6_addr *group;
+ 	unsigned long max_delay;
+ 	struct inet6_dev *idev;
++	struct in6_addr group;
+ 	struct ifmcaddr6 *ma;
+ 	struct mld_msg *mld;
+ 	int group_type;
+@@ -1427,8 +1427,8 @@ static void __mld_query_work(struct sk_buff *skb)
+ 		goto kfree_skb;
+ 
+ 	mld = (struct mld_msg *)icmp6_hdr(skb);
+-	group = &mld->mld_mca;
+-	group_type = ipv6_addr_type(group);
++	group = mld->mld_mca;
++	group_type = ipv6_addr_type(&group);
+ 
+ 	if (group_type != IPV6_ADDR_ANY &&
+ 	    !(group_type&IPV6_ADDR_MULTICAST))
+@@ -1478,7 +1478,7 @@ static void __mld_query_work(struct sk_buff *skb)
+ 		}
+ 	} else {
+ 		for_each_mc_mclock(idev, ma) {
+-			if (!ipv6_addr_equal(group, &ma->mca_addr))
++			if (!ipv6_addr_equal(&group, &ma->mca_addr))
+ 				continue;
+ 			if (ma->mca_flags & MAF_TIMER_RUNNING) {
+ 				/* gsquery <- gsquery && mark */
+diff --git a/net/ipv6/ndisc.c b/net/ipv6/ndisc.c
+index 1a6408a24d21..affbf12d44f5 100644
+--- a/net/ipv6/ndisc.c
++++ b/net/ipv6/ndisc.c
+@@ -1572,8 +1572,8 @@ static void ndisc_router_discovery(struct sk_buff *skb)
+ 		memcpy(&n, ((u8 *)(ndopts.nd_opts_mtu+1))+2, sizeof(mtu));
+ 		mtu = ntohl(n);
+ 
+-		if (in6_dev->ra_mtu != mtu) {
+-			in6_dev->ra_mtu = mtu;
++		if (READ_ONCE(in6_dev->ra_mtu) != mtu) {
++			WRITE_ONCE(in6_dev->ra_mtu, mtu);
+ 			send_ifinfo_notify = true;
+ 		}
+ 
+diff --git a/net/ipv6/netfilter/ip6_tables.c b/net/ipv6/netfilter/ip6_tables.c
+index b844e519da1b..333115dff69a 100644
+--- a/net/ipv6/netfilter/ip6_tables.c
++++ b/net/ipv6/netfilter/ip6_tables.c
+@@ -850,14 +850,12 @@ copy_entries_to_user(unsigned int total_size,
+ 		const struct xt_entry_target *t;
+ 
+ 		e = loc_cpu_entry + off;
+-		if (copy_to_user(userptr + off, e, sizeof(*e))) {
+-			ret = -EFAULT;
+-			goto free_counters;
+-		}
+-		if (copy_to_user(userptr + off
++		if (copy_to_user(userptr + off, e,
++				 offsetof(struct ip6t_entry, counters)) ||
++		    copy_to_user(userptr + off
+ 				 + offsetof(struct ip6t_entry, counters),
+ 				 &counters[num],
+-				 sizeof(counters[num])) != 0) {
++				 sizeof(counters[num]))) {
+ 			ret = -EFAULT;
+ 			goto free_counters;
+ 		}
+@@ -1246,9 +1244,8 @@ compat_copy_entry_to_user(struct ip6t_entry *e, void __user **dstptr,
+ 
+ 	origsize = *size;
+ 	ce = *dstptr;
+-	if (copy_to_user(ce, e, sizeof(struct ip6t_entry)) != 0 ||
+-	    copy_to_user(&ce->counters, &counters[i],
+-	    sizeof(counters[i])) != 0)
++	if (copy_to_user(ce, e, offsetof(struct compat_ip6t_entry, counters)) ||
++	    copy_to_user(&ce->counters, &counters[i], sizeof(counters[i])))
+ 		return -EFAULT;
+ 
+ 	*dstptr += sizeof(struct compat_ip6t_entry);
+diff --git a/net/ipv6/netfilter/nf_reject_ipv6.c b/net/ipv6/netfilter/nf_reject_ipv6.c
+index e4776bd2ed89..7b312f49b0bf 100644
+--- a/net/ipv6/netfilter/nf_reject_ipv6.c
++++ b/net/ipv6/netfilter/nf_reject_ipv6.c
+@@ -91,6 +91,32 @@ struct sk_buff *nf_reject_skb_v6_tcp_reset(struct net *net,
+ }
+ EXPORT_SYMBOL_GPL(nf_reject_skb_v6_tcp_reset);
+ 
++static bool nf_skb_is_icmp6_unreach(const struct sk_buff *skb)
++{
++	const struct ipv6hdr *ip6h = ipv6_hdr(skb);
++	u8 proto = ip6h->nexthdr;
++	u8 _type, *tp;
++	int thoff;
++	__be16 fo;
++
++	thoff = ipv6_skip_exthdr(skb, ((u8 *)(ip6h + 1) - skb->data), &proto, &fo);
++
++	if (thoff < 0 || thoff >= skb->len || fo != 0)
++		return false;
++
++	if (proto != IPPROTO_ICMPV6)
++		return false;
++
++	tp = skb_header_pointer(skb,
++				thoff + offsetof(struct icmp6hdr, icmp6_type),
++				sizeof(_type), &_type);
++
++	if (!tp)
++		return false;
++
++	return *tp == ICMPV6_DEST_UNREACH;
++}
++
+ struct sk_buff *nf_reject_skb_v6_unreach(struct net *net,
+ 					 struct sk_buff *oldskb,
+ 					 const struct net_device *dev,
+@@ -104,6 +130,10 @@ struct sk_buff *nf_reject_skb_v6_unreach(struct net *net,
+ 	if (!nf_reject_ip6hdr_validate(oldskb))
+ 		return NULL;
+ 
++	/* Don't reply to ICMPV6_DEST_UNREACH with ICMPV6_DEST_UNREACH */
++	if (nf_skb_is_icmp6_unreach(oldskb))
++		return NULL;
++
+ 	/* Include "As much of invoking packet as possible without the ICMPv6
+ 	 * packet exceeding the minimum IPv6 MTU" in the ICMP payload.
+ 	 */
+diff --git a/net/ipv6/raw.c b/net/ipv6/raw.c
+index dc31752a7edc..c644300680ba 100644
+--- a/net/ipv6/raw.c
++++ b/net/ipv6/raw.c
+@@ -437,7 +437,7 @@ static int rawv6_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+ 	if (flags & MSG_ERRQUEUE)
+ 		return ipv6_recv_error(sk, msg, len, addr_len);
+ 
+-	if (np->rxpmtu && np->rxopt.bits.rxpmtu)
++	if (np->rxopt.bits.rxpmtu && READ_ONCE(np->rxpmtu))
+ 		return ipv6_recv_rxpmtu(sk, msg, len, addr_len);
+ 
+ 	skb = skb_recv_datagram(sk, flags, &err);
+diff --git a/net/ipv6/route.c b/net/ipv6/route.c
+index bab0dc952d77..a98a08ae85da 100644
+--- a/net/ipv6/route.c
++++ b/net/ipv6/route.c
+@@ -483,6 +483,9 @@ void fib6_select_path(const struct net *net, struct fib6_result *res,
+ 		const struct fib6_nh *nh = sibling->fib6_nh;
+ 		int nh_upper_bound;
+ 
++		if (!READ_ONCE(first->fib6_nsiblings))
++			break;
++
+ 		nh_upper_bound = atomic_read(&nh->fib_nh_upper_bound);
+ 		if (hash > nh_upper_bound)
+ 			continue;
+@@ -1055,7 +1058,8 @@ static struct net_device *ip6_rt_get_dev_rcu(const struct fib6_result *res)
+ 		 */
+ 		if (netif_is_l3_slave(dev) &&
+ 		    !rt6_need_strict(&res->f6i->fib6_dst.addr))
+-			dev = l3mdev_master_dev_rcu(dev);
++			dev = l3mdev_master_dev_rcu(dev) ? :
++			      dev_net(dev)->loopback_dev;
+ 		else if (!netif_is_l3_master(dev))
+ 			dev = dev_net(dev)->loopback_dev;
+ 		/* last case is netif_is_l3_master(dev) is true in which
+@@ -5768,6 +5772,8 @@ static int rt6_fill_node(struct net *net, struct sk_buff *skb,
+ 
+ 				goto nla_put_failure;
+ 			}
++			if (!READ_ONCE(rt->fib6_nsiblings))
++				break;
+ 		}
+ 
+ 		rcu_read_unlock();
+diff --git a/net/ipv6/seg6_hmac.c b/net/ipv6/seg6_hmac.c
+index 3c3800223e0e..60b3f1957424 100644
+--- a/net/ipv6/seg6_hmac.c
++++ b/net/ipv6/seg6_hmac.c
+@@ -243,6 +243,8 @@ bool seg6_hmac_validate_skb(struct sk_buff *skb)
+ 	struct inet6_dev *idev;
+ 
+ 	idev = __in6_dev_get(skb->dev);
++	if (!idev)
++		return false;
+ 
+ 	srh = (struct ipv6_sr_hdr *)skb_transport_header(skb);
+ 
+diff --git a/net/ipv6/sit.c b/net/ipv6/sit.c
+index 3ffb6a5b1f82..8d28093830ab 100644
+--- a/net/ipv6/sit.c
++++ b/net/ipv6/sit.c
+@@ -965,6 +965,7 @@ static netdev_tx_t ipip6_tunnel_xmit(struct sk_buff *skb,
+ 		ip_rt_put(rt);
+ 		goto tx_error;
+ 	}
++	iph6 = ipv6_hdr(skb);
+ 
+ 	if (df) {
+ 		mtu = dst_mtu(&rt->dst) - t_hlen;
+diff --git a/net/ipv6/udp.c b/net/ipv6/udp.c
+index 9954ace33d2d..5d642012e6fc 100644
+--- a/net/ipv6/udp.c
++++ b/net/ipv6/udp.c
+@@ -364,7 +364,7 @@ int udpv6_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+ 	if (flags & MSG_ERRQUEUE)
+ 		return ipv6_recv_error(sk, msg, len, addr_len);
+ 
+-	if (np->rxpmtu && np->rxopt.bits.rxpmtu)
++	if (np->rxopt.bits.rxpmtu && READ_ONCE(np->rxpmtu))
+ 		return ipv6_recv_rxpmtu(sk, msg, len, addr_len);
+ 
+ try_again:
+diff --git a/net/netfilter/ipset/ip_set_hash_ipmark.c b/net/netfilter/ipset/ip_set_hash_ipmark.c
+index a22ec1a6f6ec..e26ca2a370e3 100644
+--- a/net/netfilter/ipset/ip_set_hash_ipmark.c
++++ b/net/netfilter/ipset/ip_set_hash_ipmark.c
+@@ -150,7 +150,7 @@ hash_ipmark4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 
+ 	if (retried)
+ 		ip = ntohl(h->next.ip);
+-	for (; ip <= ip_to; ip++, i++) {
++	for (; ip <= ip_to; i++) {
+ 		e.ip = htonl(ip);
+ 		if (i > IPSET_MAX_RANGE) {
+ 			hash_ipmark4_data_next(&h->next, &e);
+@@ -162,6 +162,10 @@ hash_ipmark4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 			return ret;
+ 
+ 		ret = 0;
++
++		if (ip == ip_to)
++			break;
++		ip++;
+ 	}
+ 	return ret;
+ }
+diff --git a/net/netfilter/ipset/ip_set_hash_ipport.c b/net/netfilter/ipset/ip_set_hash_ipport.c
+index 10481760a9b2..a947285eb462 100644
+--- a/net/netfilter/ipset/ip_set_hash_ipport.c
++++ b/net/netfilter/ipset/ip_set_hash_ipport.c
+@@ -175,7 +175,7 @@ hash_ipport4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 
+ 	if (retried)
+ 		ip = ntohl(h->next.ip);
+-	for (; ip <= ip_to; ip++) {
++	for (; ip <= ip_to;) {
+ 		p = retried && ip == ntohl(h->next.ip) ? ntohs(h->next.port)
+ 						       : port;
+ 		for (; p <= port_to; p++, i++) {
+@@ -192,6 +192,9 @@ hash_ipport4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 
+ 			ret = 0;
+ 		}
++		if (ip == ip_to)
++			break;
++		ip++;
+ 	}
+ 	return ret;
+ }
+diff --git a/net/netfilter/ipset/ip_set_hash_ipportip.c b/net/netfilter/ipset/ip_set_hash_ipportip.c
+index 39a01934b153..b9ac2efaa15c 100644
+--- a/net/netfilter/ipset/ip_set_hash_ipportip.c
++++ b/net/netfilter/ipset/ip_set_hash_ipportip.c
+@@ -182,7 +182,7 @@ hash_ipportip4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 
+ 	if (retried)
+ 		ip = ntohl(h->next.ip);
+-	for (; ip <= ip_to; ip++) {
++	for (; ip <= ip_to;) {
+ 		p = retried && ip == ntohl(h->next.ip) ? ntohs(h->next.port)
+ 						       : port;
+ 		for (; p <= port_to; p++, i++) {
+@@ -199,6 +199,9 @@ hash_ipportip4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 
+ 			ret = 0;
+ 		}
++		if (ip == ip_to)
++			break;
++		ip++;
+ 	}
+ 	return ret;
+ }
+diff --git a/net/netfilter/ipset/ip_set_hash_ipportnet.c b/net/netfilter/ipset/ip_set_hash_ipportnet.c
+index 5c6de605a9fb..2d6652d43199 100644
+--- a/net/netfilter/ipset/ip_set_hash_ipportnet.c
++++ b/net/netfilter/ipset/ip_set_hash_ipportnet.c
+@@ -274,7 +274,7 @@ hash_ipportnet4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 		p = port;
+ 		ip2 = ip2_from;
+ 	}
+-	for (; ip <= ip_to; ip++) {
++	for (; ip <= ip_to;) {
+ 		e.ip = htonl(ip);
+ 		for (; p <= port_to; p++) {
+ 			e.port = htons(p);
+@@ -298,6 +298,9 @@ hash_ipportnet4_uadt(struct ip_set *set, struct nlattr *tb[],
+ 			ip2 = ip2_from;
+ 		}
+ 		p = port;
++		if (ip == ip_to)
++			break;
++		ip++;
+ 	}
+ 	return ret;
+ }
+diff --git a/net/netfilter/nf_conncount.c b/net/netfilter/nf_conncount.c
+index 6156c0751056..3b8936cab34e 100644
+--- a/net/netfilter/nf_conncount.c
++++ b/net/netfilter/nf_conncount.c
+@@ -224,8 +224,8 @@ void nf_conncount_list_init(struct nf_conncount_list *list)
+ EXPORT_SYMBOL_GPL(nf_conncount_list_init);
+ 
+ /* Return true if the list is empty. Must be called with BH disabled. */
+-bool nf_conncount_gc_list(struct net *net,
+-			  struct nf_conncount_list *list)
++static bool __nf_conncount_gc_list(struct net *net,
++				   struct nf_conncount_list *list)
+ {
+ 	const struct nf_conntrack_tuple_hash *found;
+ 	struct nf_conncount_tuple *conn, *conn_n;
+@@ -237,10 +237,6 @@ bool nf_conncount_gc_list(struct net *net,
+ 	if ((u32)jiffies == READ_ONCE(list->last_gc))
+ 		return false;
+ 
+-	/* don't bother if other cpu is already doing GC */
+-	if (!spin_trylock(&list->list_lock))
+-		return false;
+-
+ 	list_for_each_entry_safe(conn, conn_n, &list->head, node) {
+ 		found = find_or_evict(net, list, conn);
+ 		if (IS_ERR(found)) {
+@@ -269,7 +265,21 @@ bool nf_conncount_gc_list(struct net *net,
+ 	if (!list->count)
+ 		ret = true;
+ 	list->last_gc = (u32)jiffies;
+-	spin_unlock(&list->list_lock);
++
++	return ret;
++}
++
++bool nf_conncount_gc_list(struct net *net,
++			  struct nf_conncount_list *list)
++{
++	bool ret;
++
++	/* don't bother if other cpu is already doing GC */
++	if (!spin_trylock_bh(&list->list_lock))
++		return false;
++
++	ret = __nf_conncount_gc_list(net, list);
++	spin_unlock_bh(&list->list_lock);
+ 
+ 	return ret;
+ }
+diff --git a/net/netfilter/nf_conntrack_expect.c b/net/netfilter/nf_conntrack_expect.c
+index 81ca348915c9..7bc64eb89bac 100644
+--- a/net/netfilter/nf_conntrack_expect.c
++++ b/net/netfilter/nf_conntrack_expect.c
+@@ -627,11 +627,15 @@ static int exp_seq_show(struct seq_file *s, void *v)
+ {
+ 	struct nf_conntrack_expect *expect;
+ 	struct nf_conntrack_helper *helper;
++	struct net *net = seq_file_net(s);
+ 	struct hlist_node *n = v;
+ 	char *delim = "";
+ 
+ 	expect = hlist_entry(n, struct nf_conntrack_expect, hnode);
+ 
++	if (!net_eq(nf_ct_exp_net(expect), net))
++		return 0;
++
+ 	if (expect->timeout.function)
+ 		seq_printf(s, "%ld ", timer_pending(&expect->timeout)
+ 			   ? (long)(expect->timeout.expires - jiffies)/HZ : 0);
+diff --git a/net/netfilter/nf_conntrack_h323_asn1.c b/net/netfilter/nf_conntrack_h323_asn1.c
+index 540d97715bd2..7b1497ed97d2 100644
+--- a/net/netfilter/nf_conntrack_h323_asn1.c
++++ b/net/netfilter/nf_conntrack_h323_asn1.c
+@@ -331,6 +331,8 @@ static int decode_int(struct bitstr *bs, const struct field_t *f,
+ 		if (nf_h323_error_boundary(bs, 0, 2))
+ 			return H323_ERROR_BOUND;
+ 		len = get_bits(bs, 2) + 1;
++		if (nf_h323_error_boundary(bs, len, 0))
++			return H323_ERROR_BOUND;
+ 		BYTE_ALIGN(bs);
+ 		if (base && (f->attr & DECODE)) {	/* timeToLive */
+ 			unsigned int v = get_uint(bs, len) + f->lb;
+@@ -796,7 +798,7 @@ static int decode_choice(struct bitstr *bs, const struct field_t *f,
+ 
+ 	if (ext || (son->attr & OPEN)) {
+ 		BYTE_ALIGN(bs);
+-		if (nf_h323_error_boundary(bs, len, 0))
++		if (nf_h323_error_boundary(bs, 2, 0))
+ 			return H323_ERROR_BOUND;
+ 		len = get_len(bs);
+ 		if (nf_h323_error_boundary(bs, len, 0))
+@@ -922,6 +924,8 @@ int DecodeQ931(unsigned char *buf, size_t sz, Q931 *q931)
+ 				break;
+ 			p++;
+ 			len--;
++			if (len <= 0)
++				break;
+ 			return DecodeH323_UserInformation(buf, p, len,
+ 							  &q931->UUIE);
+ 		}
+diff --git a/net/netfilter/nf_conntrack_helper.c b/net/netfilter/nf_conntrack_helper.c
+index bf09a1e06248..b93d3f2b0201 100644
+--- a/net/netfilter/nf_conntrack_helper.c
++++ b/net/netfilter/nf_conntrack_helper.c
+@@ -422,7 +422,7 @@ void nf_conntrack_helper_unregister(struct nf_conntrack_helper *me)
+ 	 */
+ 	synchronize_rcu();
+ 
+-	nf_ct_expect_iterate_destroy(expect_iter_me, NULL);
++	nf_ct_expect_iterate_destroy(expect_iter_me, me);
+ 	nf_ct_iterate_destroy(unhelp, me);
+ }
+ EXPORT_SYMBOL_GPL(nf_conntrack_helper_unregister);
+diff --git a/net/netfilter/nf_conntrack_netlink.c b/net/netfilter/nf_conntrack_netlink.c
+index 2cf58a8b8e4d..caf203b43b3e 100644
+--- a/net/netfilter/nf_conntrack_netlink.c
++++ b/net/netfilter/nf_conntrack_netlink.c
+@@ -3142,23 +3142,27 @@ ctnetlink_expect_event(unsigned int events, const struct nf_exp_event *item)
+ 	return 0;
+ }
+ #endif
+-static int ctnetlink_exp_done(struct netlink_callback *cb)
++
++static unsigned long ctnetlink_exp_id(const struct nf_conntrack_expect *exp)
+ {
+-	if (cb->args[1])
+-		nf_ct_expect_put((struct nf_conntrack_expect *)cb->args[1]);
+-	return 0;
++	unsigned long id = (unsigned long)exp;
++
++	id += nf_ct_get_id(exp->master);
++	id += exp->class;
++
++	return id ? id : 1;
+ }
+ 
+ static int
+ ctnetlink_exp_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ {
+ 	struct net *net = sock_net(skb->sk);
+-	struct nf_conntrack_expect *exp, *last;
+ 	struct nfgenmsg *nfmsg = nlmsg_data(cb->nlh);
+ 	u_int8_t l3proto = nfmsg->nfgen_family;
++	unsigned long last_id = cb->args[1];
++	struct nf_conntrack_expect *exp;
+ 
+ 	rcu_read_lock();
+-	last = (struct nf_conntrack_expect *)cb->args[1];
+ 	for (; cb->args[0] < nf_ct_expect_hsize; cb->args[0]++) {
+ restart:
+ 		hlist_for_each_entry_rcu(exp, &nf_ct_expect_hash[cb->args[0]],
+@@ -3170,7 +3174,7 @@ ctnetlink_exp_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ 				continue;
+ 
+ 			if (cb->args[1]) {
+-				if (exp != last)
++				if (ctnetlink_exp_id(exp) != last_id)
+ 					continue;
+ 				cb->args[1] = 0;
+ 			}
+@@ -3179,9 +3183,7 @@ ctnetlink_exp_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ 						    cb->nlh->nlmsg_seq,
+ 						    IPCTNL_MSG_EXP_NEW,
+ 						    exp) < 0) {
+-				if (!refcount_inc_not_zero(&exp->use))
+-					continue;
+-				cb->args[1] = (unsigned long)exp;
++				cb->args[1] = ctnetlink_exp_id(exp);
+ 				goto out;
+ 			}
+ 		}
+@@ -3192,32 +3194,30 @@ ctnetlink_exp_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ 	}
+ out:
+ 	rcu_read_unlock();
+-	if (last)
+-		nf_ct_expect_put(last);
+-
+ 	return skb->len;
+ }
+ 
+ static int
+ ctnetlink_exp_ct_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ {
+-	struct nf_conntrack_expect *exp, *last;
+ 	struct nfgenmsg *nfmsg = nlmsg_data(cb->nlh);
+ 	struct nf_conn *ct = cb->data;
+ 	struct nf_conn_help *help = nfct_help(ct);
+ 	u_int8_t l3proto = nfmsg->nfgen_family;
++	unsigned long last_id = cb->args[1];
++	struct nf_conntrack_expect *exp;
+ 
+ 	if (cb->args[0])
+ 		return 0;
+ 
+ 	rcu_read_lock();
+-	last = (struct nf_conntrack_expect *)cb->args[1];
++
+ restart:
+ 	hlist_for_each_entry_rcu(exp, &help->expectations, lnode) {
+ 		if (l3proto && exp->tuple.src.l3num != l3proto)
+ 			continue;
+ 		if (cb->args[1]) {
+-			if (exp != last)
++			if (ctnetlink_exp_id(exp) != last_id)
+ 				continue;
+ 			cb->args[1] = 0;
+ 		}
+@@ -3225,9 +3225,7 @@ ctnetlink_exp_ct_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ 					    cb->nlh->nlmsg_seq,
+ 					    IPCTNL_MSG_EXP_NEW,
+ 					    exp) < 0) {
+-			if (!refcount_inc_not_zero(&exp->use))
+-				continue;
+-			cb->args[1] = (unsigned long)exp;
++			cb->args[1] = ctnetlink_exp_id(exp);
+ 			goto out;
+ 		}
+ 	}
+@@ -3238,9 +3236,6 @@ ctnetlink_exp_ct_dump_table(struct sk_buff *skb, struct netlink_callback *cb)
+ 	cb->args[0] = 1;
+ out:
+ 	rcu_read_unlock();
+-	if (last)
+-		nf_ct_expect_put(last);
+-
+ 	return skb->len;
+ }
+ 
+@@ -3259,7 +3254,6 @@ static int ctnetlink_dump_exp_ct(struct net *net, struct sock *ctnl,
+ 	struct nf_conntrack_zone zone;
+ 	struct netlink_dump_control c = {
+ 		.dump = ctnetlink_exp_ct_dump_table,
+-		.done = ctnetlink_exp_done,
+ 	};
+ 
+ 	err = ctnetlink_parse_tuple(cda, &tuple, CTA_EXPECT_MASTER,
+@@ -3309,7 +3303,6 @@ static int ctnetlink_get_expect(struct sk_buff *skb,
+ 		else {
+ 			struct netlink_dump_control c = {
+ 				.dump = ctnetlink_exp_dump_table,
+-				.done = ctnetlink_exp_done,
+ 			};
+ 			return netlink_dump_start(info->sk, skb, info->nlh, &c);
+ 		}
+@@ -3462,7 +3455,7 @@ ctnetlink_change_expect(struct nf_conntrack_expect *x,
+ 
+ #if IS_ENABLED(CONFIG_NF_NAT)
+ static const struct nla_policy exp_nat_nla_policy[CTA_EXPECT_NAT_MAX+1] = {
+-	[CTA_EXPECT_NAT_DIR]	= { .type = NLA_U32 },
++	[CTA_EXPECT_NAT_DIR]	= NLA_POLICY_MAX(NLA_BE32, IP_CT_DIR_REPLY),
+ 	[CTA_EXPECT_NAT_TUPLE]	= { .type = NLA_NESTED },
+ };
+ #endif
+@@ -3556,6 +3549,12 @@ ctnetlink_alloc_expect(const struct nlattr * const cda[], struct nf_conn *ct,
+ 						 exp, nf_ct_l3num(ct));
+ 		if (err < 0)
+ 			goto err_out;
++#if IS_ENABLED(CONFIG_NF_NAT)
++	} else {
++		memset(&exp->saved_addr, 0, sizeof(exp->saved_addr));
++		memset(&exp->saved_proto, 0, sizeof(exp->saved_proto));
++		exp->dir = 0;
++#endif
+ 	}
+ 	return exp;
+ err_out:
+diff --git a/net/netfilter/nf_conntrack_proto_sctp.c b/net/netfilter/nf_conntrack_proto_sctp.c
+index 8ab03381dde7..0e492087edee 100644
+--- a/net/netfilter/nf_conntrack_proto_sctp.c
++++ b/net/netfilter/nf_conntrack_proto_sctp.c
+@@ -577,7 +577,8 @@ static int sctp_to_nlattr(struct sk_buff *skb, struct nlattr *nla,
+ }
+ 
+ static const struct nla_policy sctp_nla_policy[CTA_PROTOINFO_SCTP_MAX+1] = {
+-	[CTA_PROTOINFO_SCTP_STATE]	    = { .type = NLA_U8 },
++	[CTA_PROTOINFO_SCTP_STATE]	    = NLA_POLICY_MAX(NLA_U8,
++							 SCTP_CONNTRACK_HEARTBEAT_SENT),
+ 	[CTA_PROTOINFO_SCTP_VTAG_ORIGINAL]  = { .type = NLA_U32 },
+ 	[CTA_PROTOINFO_SCTP_VTAG_REPLY]     = { .type = NLA_U32 },
+ };
+diff --git a/net/netfilter/nf_conntrack_proto_tcp.c b/net/netfilter/nf_conntrack_proto_tcp.c
+index 9480e638e5d1..9545b64b897f 100644
+--- a/net/netfilter/nf_conntrack_proto_tcp.c
++++ b/net/netfilter/nf_conntrack_proto_tcp.c
+@@ -1222,7 +1222,8 @@ int nf_conntrack_tcp_packet(struct nf_conn *ct,
+ 			new_state = old_state;
+ 		}
+ 		if (((test_bit(IPS_SEEN_REPLY_BIT, &ct->status)
+-			 && ct->proto.tcp.last_index == TCP_SYN_SET)
++			 && ct->proto.tcp.last_index == TCP_SYN_SET
++			 && ct->proto.tcp.last_dir != dir)
+ 			|| (!test_bit(IPS_ASSURED_BIT, &ct->status)
+ 			    && ct->proto.tcp.last_index == TCP_ACK_SET))
+ 		    && ntohl(th->ack_seq) == ct->proto.tcp.last_end) {
+diff --git a/net/netfilter/nf_log.c b/net/netfilter/nf_log.c
+index be93a02497d6..016e31452cbc 100644
+--- a/net/netfilter/nf_log.c
++++ b/net/netfilter/nf_log.c
+@@ -89,7 +89,7 @@ int nf_log_register(u_int8_t pf, struct nf_logger *logger)
+ 	if (pf == NFPROTO_UNSPEC) {
+ 		for (i = NFPROTO_UNSPEC; i < NFPROTO_NUMPROTO; i++) {
+ 			if (rcu_access_pointer(loggers[i][logger->type])) {
+-				ret = -EEXIST;
++				ret = -EBUSY;
+ 				goto unlock;
+ 			}
+ 		}
+@@ -97,7 +97,7 @@ int nf_log_register(u_int8_t pf, struct nf_logger *logger)
+ 			rcu_assign_pointer(loggers[i][logger->type], logger);
+ 	} else {
+ 		if (rcu_access_pointer(loggers[pf][logger->type])) {
+-			ret = -EEXIST;
++			ret = -EBUSY;
+ 			goto unlock;
+ 		}
+ 		rcu_assign_pointer(loggers[pf][logger->type], logger);
+diff --git a/net/netfilter/nfnetlink_log.c b/net/netfilter/nfnetlink_log.c
+index 1fe453a83c58..ec56898b8069 100644
+--- a/net/netfilter/nfnetlink_log.c
++++ b/net/netfilter/nfnetlink_log.c
+@@ -351,10 +351,10 @@ static void
+ __nfulnl_send(struct nfulnl_instance *inst)
+ {
+ 	if (inst->qlen > 1) {
+-		struct nlmsghdr *nlh = nlmsg_put(inst->skb, 0, 0,
+-						 NLMSG_DONE,
+-						 sizeof(struct nfgenmsg),
+-						 0);
++		struct nlmsghdr *nlh = nfnl_msg_put(inst->skb, 0, 0,
++						    NLMSG_DONE, 0,
++						    AF_UNSPEC, NFNETLINK_V0,
++						    htons(inst->group_num));
+ 		if (WARN_ONCE(!nlh, "bad nlskb size: %u, tailroom %d\n",
+ 			      inst->skb->len, skb_tailroom(inst->skb))) {
+ 			kfree_skb(inst->skb);
+@@ -637,15 +637,11 @@ __build_packet_message(struct nfnl_log_net *log,
+ 
+ 	if (data_len) {
+ 		struct nlattr *nla;
+-		int size = nla_attr_size(data_len);
+ 
+-		if (skb_tailroom(inst->skb) < nla_total_size(data_len))
++		nla = nla_reserve(inst->skb, NFULA_PAYLOAD, data_len);
++		if (!nla)
+ 			goto nla_put_failure;
+ 
+-		nla = skb_put(inst->skb, nla_total_size(data_len));
+-		nla->nla_type = NFULA_PAYLOAD;
+-		nla->nla_len = size;
+-
+ 		if (skb_copy_bits(skb, 0, nla_data(nla), data_len))
+ 			BUG();
+ 	}
+@@ -720,7 +716,7 @@ nfulnl_log_packet(struct net *net,
+ 		+ nla_total_size(plen)			/* prefix */
+ 		+ nla_total_size(sizeof(struct nfulnl_msg_packet_hw))
+ 		+ nla_total_size(sizeof(struct nfulnl_msg_packet_timestamp))
+-		+ nla_total_size(sizeof(struct nfgenmsg));	/* NLMSG_DONE */
++		+ nlmsg_total_size(sizeof(struct nfgenmsg));	/* NLMSG_DONE */
+ 
+ 	if (in && skb_mac_header_was_set(skb)) {
+ 		size += nla_total_size(skb->dev->hard_header_len)
+diff --git a/net/netfilter/nfnetlink_queue.c b/net/netfilter/nfnetlink_queue.c
+index f13eed826cbb..4e0d1362875b 100644
+--- a/net/netfilter/nfnetlink_queue.c
++++ b/net/netfilter/nfnetlink_queue.c
+@@ -1262,8 +1262,10 @@ static int nfqnl_recv_verdict(struct sk_buff *skb, const struct nfnl_info *info,
+ 
+ 	if (entry->state.pf == PF_BRIDGE) {
+ 		err = nfqa_parse_bridge(entry, nfqa);
+-		if (err < 0)
++		if (err < 0) {
++			nfqnl_reinject(entry, NF_DROP);
+ 			return err;
++		}
+ 	}
+ 
+ 	if (nfqa[NFQA_PAYLOAD]) {
+diff --git a/net/netfilter/nft_connlimit.c b/net/netfilter/nft_connlimit.c
+index 793994622b87..b51f7713c1f8 100644
+--- a/net/netfilter/nft_connlimit.c
++++ b/net/netfilter/nft_connlimit.c
+@@ -237,13 +237,8 @@ static void nft_connlimit_destroy_clone(const struct nft_ctx *ctx,
+ static bool nft_connlimit_gc(struct net *net, const struct nft_expr *expr)
+ {
+ 	struct nft_connlimit *priv = nft_expr_priv(expr);
+-	bool ret;
+ 
+-	local_bh_disable();
+-	ret = nf_conncount_gc_list(net, priv->list);
+-	local_bh_enable();
+-
+-	return ret;
++	return nf_conncount_gc_list(net, priv->list);
+ }
+ 
+ static struct nft_expr_type nft_connlimit_type;
+diff --git a/net/netfilter/x_tables.c b/net/netfilter/x_tables.c
+index e8cc8eef0ab6..650cb725ba27 100644
+--- a/net/netfilter/x_tables.c
++++ b/net/netfilter/x_tables.c
+@@ -501,6 +501,17 @@ int xt_check_match(struct xt_mtchk_param *par,
+ 				    par->match->table, par->table);
+ 		return -EINVAL;
+ 	}
++
++	/* NFPROTO_UNSPEC implies NF_INET_* hooks which do not overlap with
++	 * NF_ARP_IN,OUT,FORWARD, allow explicit extensions with NFPROTO_ARP
++	 * support.
++	 */
++	if (par->family == NFPROTO_ARP &&
++	    par->match->family != NFPROTO_ARP) {
++		pr_info_ratelimited("%s_tables: %s match: not valid for this family\n",
++				    xt_prefix[par->family], par->match->name);
++		return -EINVAL;
++	}
+ 	if (par->match->hooks && (par->hook_mask & ~par->match->hooks) != 0) {
+ 		char used[64], allow[64];
+ 
+@@ -1016,6 +1027,18 @@ int xt_check_target(struct xt_tgchk_param *par,
+ 				    par->target->table, par->table);
+ 		return -EINVAL;
+ 	}
++
++	/* NFPROTO_UNSPEC implies NF_INET_* hooks which do not overlap with
++	 * NF_ARP_IN,OUT,FORWARD, allow explicit extensions with NFPROTO_ARP
++	 * support.
++	 */
++	if (par->family == NFPROTO_ARP &&
++	    par->target->family != NFPROTO_ARP) {
++		pr_info_ratelimited("%s_tables: %s target: not valid for this family\n",
++				    xt_prefix[par->family], par->target->name);
++		return -EINVAL;
++	}
++
+ 	if (par->target->hooks && (par->hook_mask & ~par->target->hooks) != 0) {
+ 		char used[64], allow[64];
+ 
+@@ -1761,7 +1784,7 @@ EXPORT_SYMBOL_GPL(xt_hook_ops_alloc);
+ int xt_register_template(const struct xt_table *table,
+ 			 int (*table_init)(struct net *net))
+ {
+-	int ret = -EEXIST, af = table->af;
++	int ret = -EBUSY, af = table->af;
+ 	struct xt_template *t;
+ 
+ 	mutex_lock(&xt[af].mutex);
+diff --git a/net/netfilter/xt_CT.c b/net/netfilter/xt_CT.c
+index 3ba94c34297c..498f5871c84a 100644
+--- a/net/netfilter/xt_CT.c
++++ b/net/netfilter/xt_CT.c
+@@ -16,6 +16,7 @@
+ #include <net/netfilter/nf_conntrack_ecache.h>
+ #include <net/netfilter/nf_conntrack_timeout.h>
+ #include <net/netfilter/nf_conntrack_zones.h>
++#include "nf_internals.h"
+ 
+ static inline int xt_ct_target(struct sk_buff *skb, struct nf_conn *ct)
+ {
+@@ -283,6 +284,9 @@ static void xt_ct_tg_destroy(const struct xt_tgdtor_param *par,
+ 	struct nf_conn_help *help;
+ 
+ 	if (ct) {
++		if (info->helper[0] || info->timeout[0])
++			nf_queue_nf_hook_drop(par->net);
++
+ 		help = nfct_help(ct);
+ 		xt_ct_put_helper(help);
+ 
+diff --git a/net/netfilter/xt_socket.c b/net/netfilter/xt_socket.c
+index 76e01f292aaf..811e53bee408 100644
+--- a/net/netfilter/xt_socket.c
++++ b/net/netfilter/xt_socket.c
+@@ -168,52 +168,41 @@ static int socket_mt_enable_defrag(struct net *net, int family)
+ static int socket_mt_v1_check(const struct xt_mtchk_param *par)
+ {
+ 	const struct xt_socket_mtinfo1 *info = (struct xt_socket_mtinfo1 *) par->matchinfo;
+-	int err;
+-
+-	err = socket_mt_enable_defrag(par->net, par->family);
+-	if (err)
+-		return err;
+ 
+ 	if (info->flags & ~XT_SOCKET_FLAGS_V1) {
+ 		pr_info_ratelimited("unknown flags 0x%x\n",
+ 				    info->flags & ~XT_SOCKET_FLAGS_V1);
+ 		return -EINVAL;
+ 	}
+-	return 0;
++
++	return socket_mt_enable_defrag(par->net, par->family);
+ }
+ 
+ static int socket_mt_v2_check(const struct xt_mtchk_param *par)
+ {
+ 	const struct xt_socket_mtinfo2 *info = (struct xt_socket_mtinfo2 *) par->matchinfo;
+-	int err;
+-
+-	err = socket_mt_enable_defrag(par->net, par->family);
+-	if (err)
+-		return err;
+ 
+ 	if (info->flags & ~XT_SOCKET_FLAGS_V2) {
+ 		pr_info_ratelimited("unknown flags 0x%x\n",
+ 				    info->flags & ~XT_SOCKET_FLAGS_V2);
+ 		return -EINVAL;
+ 	}
+-	return 0;
++
++	return socket_mt_enable_defrag(par->net, par->family);
+ }
+ 
+ static int socket_mt_v3_check(const struct xt_mtchk_param *par)
+ {
+ 	const struct xt_socket_mtinfo3 *info =
+ 				    (struct xt_socket_mtinfo3 *)par->matchinfo;
+-	int err;
+ 
+-	err = socket_mt_enable_defrag(par->net, par->family);
+-	if (err)
+-		return err;
+ 	if (info->flags & ~XT_SOCKET_FLAGS_V3) {
+ 		pr_info_ratelimited("unknown flags 0x%x\n",
+ 				    info->flags & ~XT_SOCKET_FLAGS_V3);
+ 		return -EINVAL;
+ 	}
+-	return 0;
++
++	return socket_mt_enable_defrag(par->net, par->family);
+ }
+ 
+ static void socket_mt_destroy(const struct xt_mtdtor_param *par)
+diff --git a/net/sched/cls_flow.c b/net/sched/cls_flow.c
+index 7657d86ad142..64b281cca6ae 100644
+--- a/net/sched/cls_flow.c
++++ b/net/sched/cls_flow.c
+@@ -501,8 +501,16 @@ static int flow_change(struct net *net, struct sk_buff *in_skb,
+ 		}
+ 
+ 		if (TC_H_MAJ(baseclass) == 0) {
+-			struct Qdisc *q = tcf_block_q(tp->chain->block);
++			struct tcf_block *block = tp->chain->block;
++			struct Qdisc *q;
+ 
++			if (tcf_block_shared(block)) {
++				NL_SET_ERR_MSG(extack,
++					       "Must specify baseclass when attaching flow filter to block");
++				goto err2;
++			}
++
++			q = tcf_block_q(block);
+ 			baseclass = TC_H_MAKE(q->handle, baseclass);
+ 		}
+ 		if (TC_H_MIN(baseclass) == 0)
+diff --git a/net/sched/cls_fw.c b/net/sched/cls_fw.c
+index 6160ef7d646a..979662292dce 100644
+--- a/net/sched/cls_fw.c
++++ b/net/sched/cls_fw.c
+@@ -72,9 +72,13 @@ static int fw_classify(struct sk_buff *skb, const struct tcf_proto *tp,
+ 			}
+ 		}
+ 	} else {
+-		struct Qdisc *q = tcf_block_q(tp->chain->block);
++		struct Qdisc *q;
+ 
+ 		/* Old method: classify the packet using its skb mark. */
++		if (tcf_block_shared(tp->chain->block))
++			return -1;
++
++		q = tcf_block_q(tp->chain->block);
+ 		if (id && (TC_H_MAJ(id) == 0 ||
+ 			   !(TC_H_MAJ(id ^ q->handle)))) {
+ 			res->classid = id;
+@@ -245,8 +249,18 @@ static int fw_change(struct net *net, struct sk_buff *in_skb,
+ 	struct nlattr *tb[TCA_FW_MAX + 1];
+ 	int err;
+ 
+-	if (!opt)
+-		return handle ? -EINVAL : 0; /* Succeed if it is old method. */
++	if (!opt) {
++		if (handle)
++			return -EINVAL;
++
++		if (tcf_block_shared(tp->chain->block)) {
++			NL_SET_ERR_MSG(extack,
++				       "Must specify mark when attaching fw filter to block");
++			return -EINVAL;
++		}
++
++		return 0; /* Succeed if it is old method. */
++	}
+ 
+ 	err = nla_parse_nested_deprecated(tb, TCA_FW_MAX, opt, fw_policy,
+ 					  NULL);
+diff --git a/net/sched/sch_cake.c b/net/sched/sch_cake.c
+index 12dd4d41605c..8d74c4f3f414 100644
+--- a/net/sched/sch_cake.c
++++ b/net/sched/sch_cake.c
+@@ -619,7 +619,7 @@ static bool cake_update_flowkeys(struct flow_keys *keys,
+ 		}
+ 		port = rev ? tuple.src.u.all : tuple.dst.u.all;
+ 		if (port != keys->ports.dst) {
+-			port = keys->ports.dst;
++			keys->ports.dst = port;
+ 			upd = true;
+ 		}
+ 	}
+@@ -2297,10 +2297,11 @@ static void cake_set_rate(struct cake_tin_data *b, u64 rate, u32 mtu,
+ 
+ 	byte_target_ns = (byte_target * rate_ns) >> rate_shft;
+ 
+-	b->cparams.target = max((byte_target_ns * 3) / 2, target_ns);
+-	b->cparams.interval = max(rtt_est_ns +
+-				     b->cparams.target - target_ns,
+-				     b->cparams.target * 2);
++	WRITE_ONCE(b->cparams.target,
++		   max((byte_target_ns * 3) / 2, target_ns));
++	WRITE_ONCE(b->cparams.interval,
++		   max(rtt_est_ns + b->cparams.target - target_ns,
++		       b->cparams.target * 2));
+ 	b->cparams.mtu_time = byte_target_ns;
+ 	b->cparams.p_inc = 1 << 24; /* 1/256 */
+ 	b->cparams.p_dec = 1 << 20; /* 1/4096 */
+@@ -2914,9 +2915,9 @@ static int cake_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
+ 		PUT_TSTAT_U32(BACKLOG_BYTES, b->tin_backlog);
+ 
+ 		PUT_TSTAT_U32(TARGET_US,
+-			      ktime_to_us(ns_to_ktime(b->cparams.target)));
++			      ktime_to_us(ns_to_ktime(READ_ONCE(b->cparams.target))));
+ 		PUT_TSTAT_U32(INTERVAL_US,
+-			      ktime_to_us(ns_to_ktime(b->cparams.interval)));
++			      ktime_to_us(ns_to_ktime(READ_ONCE(b->cparams.interval))));
+ 
+ 		PUT_TSTAT_U32(SENT_PACKETS, b->packets);
+ 		PUT_TSTAT_U32(DROPPED_PACKETS, b->tin_dropped);
+diff --git a/net/sched/sch_fq_codel.c b/net/sched/sch_fq_codel.c
+index 47b5a056165c..056895df1785 100644
+--- a/net/sched/sch_fq_codel.c
++++ b/net/sched/sch_fq_codel.c
+@@ -568,6 +568,8 @@ static int fq_codel_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
+ 	};
+ 	struct list_head *pos;
+ 
++	sch_tree_lock(sch);
++
+ 	st.qdisc_stats.maxpacket = q->cstats.maxpacket;
+ 	st.qdisc_stats.drop_overlimit = q->drop_overlimit;
+ 	st.qdisc_stats.ecn_mark = q->cstats.ecn_mark;
+@@ -576,7 +578,6 @@ static int fq_codel_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
+ 	st.qdisc_stats.memory_usage  = q->memory_usage;
+ 	st.qdisc_stats.drop_overmemory = q->drop_overmemory;
+ 
+-	sch_tree_lock(sch);
+ 	list_for_each(pos, &q->new_flows)
+ 		st.qdisc_stats.new_flows_len++;
+ 
+diff --git a/net/sched/sch_netem.c b/net/sched/sch_netem.c
+index cb38e58ee771..3bebe8043cfa 100644
+--- a/net/sched/sch_netem.c
++++ b/net/sched/sch_netem.c
+@@ -219,10 +219,10 @@ static bool loss_4state(struct netem_sched_data *q)
+ 		if (rnd < clg->a4) {
+ 			clg->state = LOST_IN_GAP_PERIOD;
+ 			return true;
+-		} else if (clg->a4 < rnd && rnd < clg->a1 + clg->a4) {
++		} else if (rnd < clg->a1 + clg->a4) {
+ 			clg->state = LOST_IN_BURST_PERIOD;
+ 			return true;
+-		} else if (clg->a1 + clg->a4 < rnd) {
++		} else {
+ 			clg->state = TX_IN_GAP_PERIOD;
+ 		}
+ 
+@@ -239,9 +239,9 @@ static bool loss_4state(struct netem_sched_data *q)
+ 	case LOST_IN_BURST_PERIOD:
+ 		if (rnd < clg->a3)
+ 			clg->state = TX_IN_BURST_PERIOD;
+-		else if (clg->a3 < rnd && rnd < clg->a2 + clg->a3) {
++		else if (rnd < clg->a2 + clg->a3) {
+ 			clg->state = TX_IN_GAP_PERIOD;
+-		} else if (clg->a2 + clg->a3 < rnd) {
++		} else {
+ 			clg->state = LOST_IN_BURST_PERIOD;
+ 			return true;
+ 		}
+@@ -512,7 +512,7 @@ static int netem_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+ 			1<<prandom_u32_max(8);
+ 	}
+ 
+-	if (unlikely(q->t_len >= sch->limit)) {
++	if (unlikely(sch->q.qlen >= sch->limit)) {
+ 		/* re-link segs, so that qdisc_drop_all() frees them all */
+ 		skb->next = segs;
+ 		qdisc_drop_all(skb, sch, to_free);
+@@ -647,9 +647,8 @@ static void get_slot_next(struct netem_sched_data *q, u64 now)
+ 
+ 	if (!q->slot_dist)
+ 		next_delay = q->slot_config.min_delay +
+-				(get_random_u32() *
+-				 (q->slot_config.max_delay -
+-				  q->slot_config.min_delay) >> 32);
++			mul_u64_u32_shr(q->slot_config.max_delay - q->slot_config.min_delay,
++					get_random_u32(), 32);
+ 	else
+ 		next_delay = tabledist(q->slot_config.dist_delay,
+ 				       (s32)(q->slot_config.dist_jitter),
+@@ -815,6 +814,29 @@ static int get_dist_table(struct disttable **tbl, const struct nlattr *attr)
+ 	return 0;
+ }
+ 
++static int validate_slot(const struct nlattr *attr, struct netlink_ext_ack *extack)
++{
++	const struct tc_netem_slot *c = nla_data(attr);
++
++	if (c->min_delay < 0 || c->max_delay < 0) {
++		NL_SET_ERR_MSG_ATTR(extack, attr, "negative slot delay");
++		return -EINVAL;
++	}
++	if (c->min_delay > c->max_delay) {
++		NL_SET_ERR_MSG_ATTR(extack, attr, "slot min delay greater than max delay");
++		return -EINVAL;
++	}
++	if (c->dist_delay < 0 || c->dist_jitter < 0) {
++		NL_SET_ERR_MSG_ATTR(extack, attr, "negative dist delay");
++		return -EINVAL;
++	}
++	if (c->max_packets < 0 || c->max_bytes < 0) {
++		NL_SET_ERR_MSG_ATTR(extack, attr, "negative slot limit");
++		return -EINVAL;
++	}
++	return 0;
++}
++
+ static void get_slot(struct netem_sched_data *q, const struct nlattr *attr)
+ {
+ 	const struct tc_netem_slot *c = nla_data(attr);
+@@ -992,6 +1014,12 @@ static int netem_change(struct Qdisc *sch, struct nlattr *opt,
+ 			goto table_free;
+ 	}
+ 
++	if (tb[TCA_NETEM_SLOT]) {
++		ret = validate_slot(tb[TCA_NETEM_SLOT], extack);
++		if (ret)
++			goto table_free;
++	}
++
+ 	sch_tree_lock(sch);
+ 	/* backup q->clg and q->loss_model */
+ 	old_clg = q->clg;
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 714b2d9d641e..b0abb34657bb 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-opt14"
++echo "-android14-11-o-ltcdz5-opt15"
+diff --git a/tools/lib/bpf/relo_core.c b/tools/lib/bpf/relo_core.c
+index c4b0e81ae293..701a4fc305b0 100644
+--- a/tools/lib/bpf/relo_core.c
++++ b/tools/lib/bpf/relo_core.c
+@@ -293,6 +293,8 @@ int bpf_core_parse_spec(const char *prog_name, const struct btf *btf,
+ 			++spec_str;
+ 		if (sscanf(spec_str, "%d%n", &access_idx, &parsed_len) != 1)
+ 			return -EINVAL;
++		if (access_idx < 0)
++			return -EINVAL;
+ 		if (spec->raw_len == BPF_CORE_SPEC_MAX_LEN)
+ 			return -E2BIG;
+ 		spec_str += parsed_len;
+diff --git a/tools/testing/selftests/bpf/prog_tests/snprintf.c b/tools/testing/selftests/bpf/prog_tests/snprintf.c
+index 4be6fdb78c6a..20a3c622bd28 100644
+--- a/tools/testing/selftests/bpf/prog_tests/snprintf.c
++++ b/tools/testing/selftests/bpf/prog_tests/snprintf.c
+@@ -114,7 +114,8 @@ static void test_snprintf_negative(void)
+ 	ASSERT_ERR(load_single_snprintf("%--------"), "invalid specifier 5");
+ 	ASSERT_ERR(load_single_snprintf("%lc"), "invalid specifier 6");
+ 	ASSERT_ERR(load_single_snprintf("%llc"), "invalid specifier 7");
+-	ASSERT_ERR(load_single_snprintf("\x80"), "non ascii character");
++	ASSERT_OK(load_single_snprintf("\x80"), "non ascii plain text");
++	ASSERT_ERR(load_single_snprintf("%\x80"), "non ascii in specifier");
+ 	ASSERT_ERR(load_single_snprintf("\x1"), "non printable character");
+ }
+ 
+diff --git a/tools/testing/selftests/bpf/prog_tests/xdp_adjust_tail.c b/tools/testing/selftests/bpf/prog_tests/xdp_adjust_tail.c
+index 89366913a251..df907798d59d 100644
+--- a/tools/testing/selftests/bpf/prog_tests/xdp_adjust_tail.c
++++ b/tools/testing/selftests/bpf/prog_tests/xdp_adjust_tail.c
+@@ -37,21 +37,26 @@ static void test_xdp_adjust_tail_shrink(void)
+ 	bpf_object__close(obj);
+ }
+ 
+-static void test_xdp_adjust_tail_grow(void)
++static void test_xdp_adjust_tail_grow(bool is_64k_pagesize)
+ {
+ 	const char *file = "./test_xdp_adjust_tail_grow.bpf.o";
+ 	struct bpf_object *obj;
+-	char buf[4096]; /* avoid segfault: large buf to hold grow results */
++	char buf[8192]; /* avoid segfault: large buf to hold grow results */
+ 	__u32 expect_sz;
+ 	int err, prog_fd;
+ 	LIBBPF_OPTS(bpf_test_run_opts, topts,
+ 		.data_in = &pkt_v4,
+-		.data_size_in = sizeof(pkt_v4),
+ 		.data_out = buf,
+ 		.data_size_out = sizeof(buf),
+ 		.repeat = 1,
+ 	);
+ 
++	/* topts.data_size_in as a special signal to bpf prog */
++	if (is_64k_pagesize)
++		topts.data_size_in = sizeof(pkt_v4) - 1;
++	else
++		topts.data_size_in = sizeof(pkt_v4);
++
+ 	err = bpf_prog_test_load(file, BPF_PROG_TYPE_XDP, &obj, &prog_fd);
+ 	if (!ASSERT_OK(err, "test_xdp_adjust_tail_grow"))
+ 		return;
+@@ -201,7 +206,7 @@ static void test_xdp_adjust_frags_tail_shrink(void)
+ 	bpf_object__close(obj);
+ }
+ 
+-static void test_xdp_adjust_frags_tail_grow(void)
++static void test_xdp_adjust_frags_tail_grow_4k(void)
+ {
+ 	const char *file = "./test_xdp_adjust_tail_grow.bpf.o";
+ 	__u32 exp_size;
+@@ -266,16 +271,93 @@ static void test_xdp_adjust_frags_tail_grow(void)
+ 	bpf_object__close(obj);
+ }
+ 
++static void test_xdp_adjust_frags_tail_grow_64k(void)
++{
++	const char *file = "./test_xdp_adjust_tail_grow.bpf.o";
++	__u32 exp_size;
++	struct bpf_program *prog;
++	struct bpf_object *obj;
++	int err, i, prog_fd;
++	__u8 *buf;
++	LIBBPF_OPTS(bpf_test_run_opts, topts);
++
++	obj = bpf_object__open(file);
++	if (libbpf_get_error(obj))
++		return;
++
++	prog = bpf_object__next_program(obj, NULL);
++	if (bpf_object__load(obj))
++		goto out;
++
++	prog_fd = bpf_program__fd(prog);
++
++	buf = malloc(262144);
++	if (!ASSERT_OK_PTR(buf, "alloc buf 256Kb"))
++		goto out;
++
++	/* Test case add 10 bytes to last frag */
++	memset(buf, 1, 262144);
++	exp_size = 90000 + 10;
++
++	topts.data_in = buf;
++	topts.data_out = buf;
++	topts.data_size_in = 90000;
++	topts.data_size_out = 262144;
++	err = bpf_prog_test_run_opts(prog_fd, &topts);
++
++	ASSERT_OK(err, "90Kb+10b");
++	ASSERT_EQ(topts.retval, XDP_TX, "90Kb+10b retval");
++	ASSERT_EQ(topts.data_size_out, exp_size, "90Kb+10b size");
++
++	for (i = 0; i < 90000; i++) {
++		if (buf[i] != 1)
++			ASSERT_EQ(buf[i], 1, "90Kb+10b-old");
++	}
++
++	for (i = 90000; i < 90010; i++) {
++		if (buf[i] != 0)
++			ASSERT_EQ(buf[i], 0, "90Kb+10b-new");
++	}
++
++	for (i = 90010; i < 262144; i++) {
++		if (buf[i] != 1)
++			ASSERT_EQ(buf[i], 1, "90Kb+10b-untouched");
++	}
++
++	/* Test a too large grow */
++	memset(buf, 1, 262144);
++	exp_size = 90001;
++
++	topts.data_in = topts.data_out = buf;
++	topts.data_size_in = 90001;
++	topts.data_size_out = 262144;
++	err = bpf_prog_test_run_opts(prog_fd, &topts);
++
++	ASSERT_OK(err, "90Kb+10b");
++	ASSERT_EQ(topts.retval, XDP_DROP, "90Kb+10b retval");
++	ASSERT_EQ(topts.data_size_out, exp_size, "90Kb+10b size");
++
++	free(buf);
++out:
++	bpf_object__close(obj);
++}
++
+ void test_xdp_adjust_tail(void)
+ {
++	int page_size = getpagesize();
++
+ 	if (test__start_subtest("xdp_adjust_tail_shrink"))
+ 		test_xdp_adjust_tail_shrink();
+ 	if (test__start_subtest("xdp_adjust_tail_grow"))
+-		test_xdp_adjust_tail_grow();
++		test_xdp_adjust_tail_grow(page_size == 65536);
+ 	if (test__start_subtest("xdp_adjust_tail_grow2"))
+ 		test_xdp_adjust_tail_grow2();
+ 	if (test__start_subtest("xdp_adjust_frags_tail_shrink"))
+ 		test_xdp_adjust_frags_tail_shrink();
+-	if (test__start_subtest("xdp_adjust_frags_tail_grow"))
+-		test_xdp_adjust_frags_tail_grow();
++	if (test__start_subtest("xdp_adjust_frags_tail_grow")) {
++		if (page_size == 65536)
++			test_xdp_adjust_frags_tail_grow_64k();
++		else
++			test_xdp_adjust_frags_tail_grow_4k();
++	}
+ }
+diff --git a/tools/testing/selftests/bpf/progs/test_xdp_adjust_tail_grow.c b/tools/testing/selftests/bpf/progs/test_xdp_adjust_tail_grow.c
+index 53b64c999450..706a8d4c6e2c 100644
+--- a/tools/testing/selftests/bpf/progs/test_xdp_adjust_tail_grow.c
++++ b/tools/testing/selftests/bpf/progs/test_xdp_adjust_tail_grow.c
+@@ -13,7 +13,9 @@ int _xdp_adjust_tail_grow(struct xdp_md *xdp)
+ 	/* Data length determine test case */
+ 
+ 	if (data_len == 54) { /* sizeof(pkt_v4) */
+-		offset = 4096; /* test too large offset */
++		offset = 4096; /* test too large offset, 4k page size */
++	} else if (data_len == 53) { /* sizeof(pkt_v4) - 1 */
++		offset = 65536; /* test too large offset, 64k page size */
+ 	} else if (data_len == 74) { /* sizeof(pkt_v6) */
+ 		offset = 40;
+ 	} else if (data_len == 64) {
+@@ -25,6 +27,10 @@ int _xdp_adjust_tail_grow(struct xdp_md *xdp)
+ 		offset = 10;
+ 	} else if (data_len == 9001) {
+ 		offset = 4096;
++	} else if (data_len == 90000) {
++		offset = 10; /* test a small offset, 64k page size */
++	} else if (data_len == 90001) {
++		offset = 65536; /* test too large offset, 64k page size */
+ 	} else {
+ 		return XDP_ABORTED; /* No matching test */
+ 	}

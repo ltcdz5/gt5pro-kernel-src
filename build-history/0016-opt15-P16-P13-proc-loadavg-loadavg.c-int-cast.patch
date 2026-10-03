@@ -1,0 +1,58 @@
+From a54a45ae545529c95be4708dc0c1bb5a723f6e63 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 17:08:53 +0800
+Subject: [PATCH 16/33] =?UTF-8?q?opt15-P16:=20=E4=BF=AE=E6=8E=89=20P13=20?=
+ =?UTF-8?q?=E5=BC=95=E5=85=A5=E7=9A=84=20/proc/loadavg=20=E7=88=86?=
+ =?UTF-8?q?=E8=A1=A8=20=E2=80=94=E2=80=94=20=E9=80=80=E5=9B=9E=20loadavg.c?=
+ =?UTF-8?q?=20=E7=9A=84=20(int)=20cast?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+问题(实测):
+  P13 之后 /proc/loadavg 读到 17178707395.13 且持续上涨(约 +5.4e3/秒),
+  三个值还反常地"越慢的涨得越快",结构上就不可能。
+  定量对账: 4 x (2^32-1) = 17179869180 ~= 实测 1.7179e10  ★ 精确吻合。
+
+根因:
+  上游 6.1.147 对一个 bug 的修复是【成对】的:
+    kernel/sched/sched.h : unsigned int  nr_uninterruptible  -> unsigned long
+    kernel/sched/loadavg.c: (int)this_rq->nr_uninterruptible -> (long)...
+  P13 只应用了 .c 那半边(因为 sched.h 属于"头文件", 被我单独归到 462 个头文件池里),
+  于是 -1 不再被 (int) 截断, 变成 +4294967295, 每个 rq 灌进 4.29e9, 四路合计 1.72e10。
+
+为什么不能补上 .h 那半边(试过, 被闸门拦下):
+  把 nr_uninterruptible 改成 unsigned long 会改变 struct rq 的内存布局, 实测
+  会拒绝装载的厂商模块从 1 个暴涨到 47 个, 漂移 16 个符号:
+    runqueues / update_rq_clock / task_rq_lock / raw_spin_rq_lock_nested
+    raw_spin_rq_unlock / balance_push_callback / sched_setattr_nocheck
+    wake_up_process / sched_setscheduler(_nocheck) / set_user_nice
+    set_cpus_allowed_ptr / sched_show_task / sched_set_fifo / sched_set_normal
+  其中 oplus_bsp_sched_ext.ko(7 个) 与 oplus_bsp_game_opt.ko 直接操作 runqueues
+  => 厂商 WALT/sched_ext 栈依赖 struct rq 的确切布局, 此字段动不得。
+
+处置:
+  sched.h 保持厂商的 unsigned int; loadavg.c 的 cast 退回 (int) = 原厂行为。
+  => /proc/loadavg 恢复正常, 且 struct rq 布局零改动。
+
+验证:
+  仅 kernel/sched/loadavg.c 一行改动; make rc=0
+  闸门1 导出集合 PASS(新增=22 消失=0 命中厂商 0/0)
+  闸门2 会拒载模块 = 1 (仅 bluetooth.ko, 基线就不符, 与 opt14/15/P5/P11/P13 一致)
+---
+ kernel/sched/loadavg.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/sched/loadavg.c b/kernel/sched/loadavg.c
+index 35537ea03fff..52c8f8226b0d 100644
+--- a/kernel/sched/loadavg.c
++++ b/kernel/sched/loadavg.c
+@@ -80,7 +80,7 @@ long calc_load_fold_active(struct rq *this_rq, long adjust)
+ 	long nr_active, delta = 0;
+ 
+ 	nr_active = this_rq->nr_running - adjust;
+-	nr_active += (long)this_rq->nr_uninterruptible;
++	nr_active += (int)this_rq->nr_uninterruptible;
+ 
+ 	if (nr_active != this_rq->calc_load_active) {
+ 		delta = nr_active - this_rq->calc_load_active;

@@ -1,0 +1,184 @@
+From 77aa56a8024c4362f84019a66183bb83a3947015 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sat, 3 Oct 2026 18:16:25 +0800
+Subject: [PATCH 33/33] =?UTF-8?q?v1.1-opt42:=20USB=20gadget=20bRequestType?=
+ =?UTF-8?q?=20=E4=BD=8D=E5=9F=9F=E8=AF=AF=E5=88=A4=20+=20LZ4=20armv8=20Per?=
+ =?UTF-8?q?mtable=20=E8=B6=8A=E7=95=8C=E8=AF=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+## 【1】drivers/usb/gadget/composite.c:1703 —— bRequestType 是位域，不是枚举
+上游 `f08adf5add9a071160c68bb2a61d697f39ab0758`（Greg KH，2021-12-14
+"USB: gadget: bRequestType is a bitfield, not a enum"）。
+
+原代码用**整字节比较**判方向：
+```c
+if (w_length > USB_COMP_EP0_BUFSIZ) {
+        if (ctrl->bRequestType == USB_DIR_OUT) {   /* USB_DIR_OUT == 0x00 */
+                goto done;
+        } else {
+                *temp = cpu_to_le16(USB_COMP_EP0_BUFSIZ);   /* 把 wLength 改写成 64 */
+                w_length = USB_COMP_EP0_BUFSIZ;
+        }
+}
+```
+`USB_DIR_OUT` 是 **0**（`include/uapi/linux/usb/ch9.h:50`），所以**只有恰好 0x00 的请求会被 stall**；
+`bRequestType ∈ {0x01,0x02,0x21,0x40,…}` 且 `wLength > 64` 的 **OUT 控制请求本应 stall，
+实际被 clamp 成 64 后继续下发到 function 层** ⇒ 外部输入校验缺失。
+（RNDIS 的 `USB_CDC_SEND_ENCAPSULATED_COMMAND` 就是 `0x21`，正好命中。）
+
+修法（照上游）：改测方向位，分支体对调
+```c
+if (ctrl->bRequestType & USB_DIR_IN) { clamp } else { goto done; }
+```
+
+**可达性**：`composite_setup()` 是 composite 层 ep0 的**唯一**入口
+（`configfs.c:1721 .setup = configfs_composite_setup` → `:1607 composite_setup`）；
+本机 `a600000.dwc3` state=configured、g1/g2 已绑定，ADB(f_fs)/RNDIS 的每个控制请求都经过它；
+`bRequestType`/`wLength` 由对端 PC 完全控制。
+
+**来源核查**：
+- ACK 侧（`remotes/ack/a14-09`）已是修好的形式 `& USB_DIR_IN`
+- `git log -S'== USB_DIR_OUT'` ⇒ 唯一引入者是 `7a244ff18`（那次整包 Revert OnePlus "Synchronize code"）
+  把 2021 年的修复退回了旧形式
+- `git diff snap-6.1.141 HEAD` ⇒ 无差异 ⇒ **厂商基线自带旧形式**（OPPO/高通从未取这个上游修复）
+- 同源 `legacy/dbgp.c:349`、`legacy/inode.c:1339` **不改**：`# CONFIG_USB_GADGETFS is not set`、
+  `# CONFIG_USB_G_DBGP is not set` ⇒ 不编译、本机不可达
+
+## 【2】lib/lz4/lz4armv8/lz4armv8.S —— Permtable 越界读（数组维度 vs 上界不匹配）
+标签 `11:` 处（原 :197-206）：
+```asm
+11:     ldr  q1, [copy_from_ptr]
+        add  tmp, permtable_addr, offset, lsl #5     /* offset*32 */
+        ldp  q2, q3, [tmp]                           /* 读 Permtable + offset*32 */
+        tbl  v0.16b, {v1.16b}, v2.16b
+        tbl  v1.16b, {v1.16b}, v3.16b
+        cmp  offset , #16        /* ★ 这个判断在【读表之后】才做 */
+        b.lo 12f
+        ldp  q0, q1, [copy_from_ptr]
+```
+标签 9/10 只排除了 `offset >= match_length` 与 `offset >= 32` ⇒ 到这里 `offset ∈ [1,31]`。
+而 **`Permtable` 只有 16 项 × 32B = 512B**（`:284-300`，注释 `//offset = 0 … 15`），
+`Copylength_table` 紧随其后 32B（`:303-305`）。
+
+**用已编出的 `.o` 证实布局（硬证据）**：
+```
+llvm-readelf -S: .rodata = 0x220 = 544 字节（= 512 + 32）
+llvm-nm -n:      Permtable @ 0x0    Copylength_table @ 0x200
+```
+⇒ `offset ∈ [16,31]` 时读 `Permtable+512..992` ⇒ **越界最多 480 字节**（offset≥17 时越出整个 `.rodata`）。
+
+**实际后果（不夸大）**：该结果在 `ldp q0,q1,[copy_from_ptr]` 处被整体覆盖
+⇒ **不算错输出、不泄露、当前不缺页**（越界部分仍落在 vmlinux 合并后的只读段内）
+⇒ 定性 = **latent 健壮性缺陷，不是可利用漏洞**；但一旦该 `.o` 的 `.rodata` 页尾对齐
+（`CONFIG_STRICT_KERNEL_RWX`）就成真缺页。
+
+**可达性**：`ar t out/vmlinux.a` 里有 `lz4accel.o` + `lz4armv8.o`；
+`/data` 是 f2fs 且开着 lz4 压缩 ⇒ 每次非平凡块解压都进这段 asm；
+`LZ4_FAST_MARGIN=128`（`lz4accel.h:4`）⇒ 门槛极低；
+`16 <= offset < match_length` 是 LZ4 的**普通常见匹配**，不是畸形输入才触发。
+
+**修法**：把已有的 `cmp offset,#16` 前移到读表之前（语义等价）：
+```asm
+11:     ldr  q1, [copy_from_ptr]
+        cmp  offset , #16
+        b.hs 15f
+        add  tmp, permtable_addr, offset, lsl #5
+        ldp  q2, q3, [tmp]
+        tbl  v0.16b, {v1.16b}, v2.16b
+        tbl  v1.16b, {v1.16b}, v3.16b
+        b    12f
+15:     ldp  q0, q1, [copy_from_ptr]
+12:     ldrb w_tmp, [cplen_table_addr, offset]
+        ...
+```
+
+**反汇编证实已进目标码**：
+```
+0x124: cmp  x12, #0x10        ← 先判
+0x128: b.hs 0x140             ← 不满足则跳过表
+0x12c: add  x11, x13, x12, lsl #5
+0x130: ldp  q2, q3, [x11]     ← 读表（现在保证 offset<16）
+0x140: ldp  q0, q1, [x9]
+```
+
+## 验证
+  make rc=0 错误=0
+  crc_diff（opt41 → opt42）：新增 0 消失 0 ★CRC 变化 **0** ⇒ 厂商 493 个 .ko 不受影响
+  闸门1  新增=50 消失=1 | 命中厂商 新增=0 消失=0   PASS
+  闸门2  会拒绝装载的模块 = 1（system_dlkm/bluetooth.ko, sk_filter_trim_cap）
+  版本串 6.1.141-android14-11-o-ltcdz5-v1.1-opt42
+  横幅   #68-ack304-v1.1-opt42
+  Image  38,095,360 B
+
+## 备注
+- 死副本 `lib/lz4armv8.S`（8088B，无 Makefile 引用、`out/` 无对应 `.o`、`ar t` 无对应成员）
+  **本轮未动** —— 建议以后清理，避免误改错文件。
+- `f_ccid.c` / `f_fs_ipc_log.c` **不在本内核树里**（`drivers/usb/gadget/function/` 全目录无此二文件）
+  ⇒ 设备上的 `usb_f_ccid`/`f_fs_ipc_log`/`usb_f_qdss`/`usb_f_gsi` 来自厂商预编译模块或树外源码，
+  无从审计。
+---
+ drivers/usb/gadget/composite.c | 11 ++++++++---
+ lib/lz4/lz4armv8/lz4armv8.S    |  6 ++++--
+ scripts/setlocalversion        |  2 +-
+ 3 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/usb/gadget/composite.c b/drivers/usb/gadget/composite.c
+index 4762f8e9ed9e..01cb080b7fe9 100644
+--- a/drivers/usb/gadget/composite.c
++++ b/drivers/usb/gadget/composite.c
+@@ -1700,14 +1700,19 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+ 	u8				endp;
+ 
+ 	if (w_length > USB_COMP_EP0_BUFSIZ) {
+-		if (ctrl->bRequestType == USB_DIR_OUT) {
+-			goto done;
+-		} else {
++		/* bRequestType is a bitfield: test the direction bit, do not
++		 * compare the whole byte against USB_DIR_OUT (== 0).  A bare
++		 * equality let OUT requests with any other bRequestType (e.g.
++		 * RNDIS' 0x21) through with wLength clamped instead of stalled.
++		 */
++		if (ctrl->bRequestType & USB_DIR_IN) {
+ 			/* Cast away the const, we are going to overwrite on purpose. */
+ 			__le16 *temp = (__le16 *)&ctrl->wLength;
+ 
+ 			*temp = cpu_to_le16(USB_COMP_EP0_BUFSIZ);
+ 			w_length = USB_COMP_EP0_BUFSIZ;
++		} else {
++			goto done;
+ 		}
+ 	}
+ 
+diff --git a/lib/lz4/lz4armv8/lz4armv8.S b/lib/lz4/lz4armv8/lz4armv8.S
+index 1d836f686dd9..67e26d397d72 100644
+--- a/lib/lz4/lz4armv8/lz4armv8.S
++++ b/lib/lz4/lz4armv8/lz4armv8.S
+@@ -197,12 +197,14 @@
+ 11:
+ 	/* Copy_offset_lt_32: */
+ 	ldr	q1, [copy_from_ptr]
++	cmp	offset , #16
++	b.hs	15f
+ 	add	tmp, permtable_addr, offset, lsl #5
+ 	ldp	q2, q3, [tmp]
+ 	tbl	v0.16b, {v1.16b}, v2.16b
+ 	tbl	v1.16b, {v1.16b}, v3.16b
+-	cmp     offset , #16
+-	b.lo    12f
++	b	12f
++15:
+ 	ldp     q0, q1, [copy_from_ptr]
+ 
+ 12:
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index faa331f724d5..1a6400c38dc4 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-v1.1-opt41"
++echo "-android14-11-o-ltcdz5-v1.1-opt42"

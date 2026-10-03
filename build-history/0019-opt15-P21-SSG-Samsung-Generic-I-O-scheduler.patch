@@ -1,0 +1,57 @@
+From e17ad23693abb24f49a8d0ebe8bc04af08997ae6 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 21:24:27 +0800
+Subject: [PATCH 19/33] =?UTF-8?q?opt15-P21:=20=E5=90=AF=E7=94=A8=20SSG=20?=
+ =?UTF-8?q?=E7=94=B5=E6=A2=AF=20(Samsung=20Generic=20I/O=20scheduler)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+来源: cctv18 的包里有 block/ssg-iosched.c + ssg-stat.c + ssg-cgroup.c,
+      但我们只编进去了 kyber/mq-deadline/bfq, 没开 SSG。
+
+接线本来就是完整的, 只差 config 开关:
+  block/Kconfig.iosched:46  config MQ_IOSCHED_SSG
+  block/Kconfig.iosched:52  config MQ_IOSCHED_SSG_CGROUP (depends on BLK_CGROUP)
+  block/Makefile:28-30      ssg-$(CONFIG_MQ_IOSCHED_SSG) := ssg-iosched.o ssg-stat.o
+
+改动:
+  CONFIG_MQ_IOSCHED_SSG=y
+  CONFIG_MQ_IOSCHED_SSG_CGROUP=y
+  (同时写进 gki_defconfig, 保持可复现)
+
+为什么值得试:
+  UFS 实际队列是 sda..sdf 六个 LUN, 全部用 mq-deadline。
+  SSG 是三星在闪存上打磨出来的调度器(读/写分离排序 + sbitmap),
+  正是 UFS 场景针对性优化 —— 是 cctv18 那个包里唯一的性能向改动。
+  我们的文档曾记"README 说它在一加12 导致开不了机",
+  但那是**一加12 的个体问题**(那份树基于一加 12 的 DTS/存储拓扑),
+  本树是 OPPO/realme 自己的 sm8650/pineapple 拓扑, 未必复现。
+  ⇒ 所以要实测, 不能靠转述。
+
+注意:
+  本版只**编进去**, 不切换。刷入后先确认:
+    /sys/block/sda/queue/scheduler 的可选列表里出现 [ssg]
+  再决定是否切。切法: echo ssg > /sys/block/sdX/queue/scheduler
+  回退随时: echo mq-deadline > /sys/block/sdX/queue/scheduler (无需重启)
+
+验证:
+  vmlinux.a 里有 ssg-iosched.o / ssg-stat.o / ssg-cgroup.o
+  Image 38,357,504 B (+69,632 vs P20)
+  make rc=0
+  闸门1 导出集合 PASS(新增=38 消失=0 命中厂商 0/0)
+  闸门2 厂商 CRC 真值: 会拒载模块 = 1 (仅 bluetooth.ko, 基线就不符)
+---
+ arch/arm64/configs/gki_defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index ae85cfa454bd..90eb20cf5e0e 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -844,3 +844,5 @@ CONFIG_SECURITY_PATH=y
+ CONFIG_SLAB_MERGE_DEFAULT=y
+ CONFIG_XZ_DEC_MICROLZMA=y
+ CONFIG_ZRAM_MEMORY_TRACKING=y
++CONFIG_MQ_IOSCHED_SSG=y
++CONFIG_MQ_IOSCHED_SSG_CGROUP=y

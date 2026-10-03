@@ -1,0 +1,1047 @@
+From 3448adab80a6acd743e6dfe8359ae02c52809223 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Fri, 2 Oct 2026 23:16:04 +0800
+Subject: [PATCH 21/33] =?UTF-8?q?opt15-P27:=20ACK=20round4=20=E5=A4=B4?=
+ =?UTF-8?q?=E6=96=87=E4=BB=B6=E4=BF=AE=E5=A4=8D=E6=89=B9=20=E2=80=94?=
+ =?UTF-8?q?=E2=80=94=2011=20=E4=B8=AA=E4=B8=8D=E7=A2=B0=E4=B8=AD=E6=9E=A2?=
+ =?UTF-8?q?=E7=BB=93=E6=9E=84=E4=BD=93=E7=9A=84=E6=8F=90=E4=BA=A4?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+背景: round4 的 340 个缺失块里, 有 64 个提交改了头文件(被排除在"纯 .c"批之外)。
+本轮从里面挑出【不碰中枢结构体】的 16 个, 再剔除依赖缺失/CRC 风险的, 最终 11 个。
+
+落地:
+  d06eb2620d3b  scsi: ufs: core: Fix use-after-free in init error and remove paths   ★UFS
+  74cbeeca4f16  f2fs: compress: fix UAF of f2fs_inode_info in f2fs_free_dic        ★f2fs UAF
+  708709c65a18  keys: Pin request_key_auth payload in instantiate paths              ★安全
+  a071e057518d  net/sched: fix pedit partial COW leading to page cache corruption    ★安全
+  ac8a2e0d287e  quota: Fix race of dquot_scan_active() with quota deactivation       ★竞态
+  b20e8a98dd29  Bluetooth: L2CAP: reject BR/EDR signaling packets over MTUsize
+  4ec17782fd18  Bluetooth: serialize accept_q access
+  c67a955c93db  ALSA: usb-audio: Fix potential leak of pd at parsing UAC3 streams
+  4da9b12d160f  BACKPORT: l2tp: improve tunnel/session refcount helpers
+  b0e6cd8eb845  net: mctp: fix don't require received header reserved bits to be zero
+  4c7fdb9d3710  net/packet: convert po->tp_tx_has_off to an atomic flag
+
+⛔ 闸门拦下的(不刷):
+  1f1b98fea6b9  net/sched: act_api: use RCU with deferred freeing for action lifecycle
+    改 include/net/act_api.h 的 struct tcf_exts => 闸门2 报 2 个模块拒载,
+    漂移符号 tcf_action_exec / tcf_exts_{destroy,dump,dump_stats,validate}
+    —— 与 opt15 那次翻车的符号完全相同。再次证明 include/net/act_api.h 碰不得。
+
+其它未纳入:
+  43127ac6bc0a  hrtimer trace 签名改了, 其 .c 配套在别处(编不过)
+  7c97366f5dac  usb gadget f_ncm 的 bound 字段, 其 .c 配套在别处(编不过)
+  5716a293fb19 / 5cab1c989f93  (wacom OOB / KVM x86) —— 本机无关
+  8 个碰中枢结构体(mm.h/sock.h/sched.h/padata.h/device.h/fwnode.h/lockdep.h) —— 未动
+
+验证:
+  make rc=0
+  闸门1 导出集合 PASS(新增=44 消失=0 命中厂商 0/0)
+  闸门2 厂商 CRC 真值: 会拒载模块 = 1 (仅 bluetooth.ko, 基线就不符)
+---
+ drivers/ufs/host/ufshcd-pci.c        |  2 -
+ drivers/ufs/host/ufshcd-pltfrm.c     | 25 ++++--------
+ fs/f2fs/f2fs.h                       |  2 +
+ fs/quota/dquot.c                     | 38 ++++++++++++++----
+ include/keys/request_key_auth-type.h |  2 +
+ include/linux/quotaops.h             |  9 +----
+ include/net/bluetooth/bluetooth.h    |  1 +
+ include/net/bluetooth/l2cap.h        |  1 +
+ include/net/mctp.h                   |  3 ++
+ include/net/tc_act/tc_pedit.h        |  1 -
+ include/ufs/ufshcd.h                 |  1 -
+ net/bluetooth/l2cap_core.c           | 46 ++++++++++++++++++++++
+ net/l2tp/l2tp_core.c                 | 42 +++++++-------------
+ net/l2tp/l2tp_core.h                 |  6 +--
+ net/l2tp/l2tp_ppp.c                  | 26 ++++++-------
+ net/packet/af_packet.c               |  6 +--
+ net/packet/internal.h                |  4 +-
+ security/keys/internal.h             |  2 +
+ security/keys/keyctl.c               | 24 +++++++++---
+ security/keys/request_key_auth.c     | 33 +++++++++++++++-
+ sound/usb/quirks.c                   |  2 +-
+ sound/usb/stream.c                   | 58 +++++++++++-----------------
+ sound/usb/stream.h                   |  3 +-
+ 23 files changed, 205 insertions(+), 132 deletions(-)
+
+diff --git a/drivers/ufs/host/ufshcd-pci.c b/drivers/ufs/host/ufshcd-pci.c
+index 9c911787f84c..cd52606d00c8 100644
+--- a/drivers/ufs/host/ufshcd-pci.c
++++ b/drivers/ufs/host/ufshcd-pci.c
+@@ -525,7 +525,6 @@ static void ufshcd_pci_remove(struct pci_dev *pdev)
+ 	pm_runtime_forbid(&pdev->dev);
+ 	pm_runtime_get_noresume(&pdev->dev);
+ 	ufshcd_remove(hba);
+-	ufshcd_dealloc_host(hba);
+ }
+ 
+ /**
+@@ -570,7 +569,6 @@ ufshcd_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ 	err = ufshcd_init(hba, mmio_base, pdev->irq);
+ 	if (err) {
+ 		dev_err(&pdev->dev, "Initialization failed\n");
+-		ufshcd_dealloc_host(hba);
+ 		return err;
+ 	}
+ 
+diff --git a/drivers/ufs/host/ufshcd-pltfrm.c b/drivers/ufs/host/ufshcd-pltfrm.c
+index 5739ff007828..44668edc3224 100644
+--- a/drivers/ufs/host/ufshcd-pltfrm.c
++++ b/drivers/ufs/host/ufshcd-pltfrm.c
+@@ -343,21 +343,17 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
+ 	struct device *dev = &pdev->dev;
+ 
+ 	mmio_base = devm_platform_ioremap_resource(pdev, 0);
+-	if (IS_ERR(mmio_base)) {
+-		err = PTR_ERR(mmio_base);
+-		goto out;
+-	}
++	if (IS_ERR(mmio_base))
++		return PTR_ERR(mmio_base);
+ 
+ 	irq = platform_get_irq(pdev, 0);
+-	if (irq < 0) {
+-		err = irq;
+-		goto out;
+-	}
++	if (irq < 0)
++		return irq;
+ 
+ 	err = ufshcd_alloc_host(dev, &hba);
+ 	if (err) {
+ 		dev_err(dev, "Allocation failed\n");
+-		goto out;
++		return err;
+ 	}
+ 
+ 	hba->vops = vops;
+@@ -366,13 +362,13 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
+ 	if (err) {
+ 		dev_err(dev, "%s: clock parse failed %d\n",
+ 				__func__, err);
+-		goto dealloc_host;
++		return err;
+ 	}
+ 	err = ufshcd_parse_regulator_info(hba);
+ 	if (err) {
+ 		dev_err(dev, "%s: regulator init failed %d\n",
+ 				__func__, err);
+-		goto dealloc_host;
++		return err;
+ 	}
+ 
+ 	ufshcd_init_lanes_per_dir(hba);
+@@ -380,18 +376,13 @@ int ufshcd_pltfrm_init(struct platform_device *pdev,
+ 	err = ufshcd_init(hba, mmio_base, irq);
+ 	if (err) {
+ 		dev_err(dev, "Initialization failed\n");
+-		goto dealloc_host;
++		return err;
+ 	}
+ 
+ 	pm_runtime_set_active(dev);
+ 	pm_runtime_enable(dev);
+ 
+ 	return 0;
+-
+-dealloc_host:
+-	ufshcd_dealloc_host(hba);
+-out:
+-	return err;
+ }
+ EXPORT_SYMBOL_GPL(ufshcd_pltfrm_init);
+ 
+diff --git a/fs/f2fs/f2fs.h b/fs/f2fs/f2fs.h
+index fc9c0021c870..aed074580359 100644
+--- a/fs/f2fs/f2fs.h
++++ b/fs/f2fs/f2fs.h
+@@ -1752,6 +1752,7 @@ struct compress_io_ctx {
+ struct decompress_io_ctx {
+ 	u32 magic;			/* magic number to indicate page is compressed */
+ 	struct inode *inode;		/* inode the context belong to */
++	struct f2fs_sb_info *sbi;	/* f2fs_sb_info pointer */
+ 	pgoff_t cluster_idx;		/* cluster index number */
+ 	unsigned int cluster_size;	/* page count in cluster */
+ 	unsigned int log_cluster_size;	/* log of cluster size */
+@@ -1795,6 +1796,7 @@ struct decompress_io_ctx {
+ 
+ 	bool failed;			/* IO error occurred before decompression? */
+ 	bool need_verity;		/* need fs-verity verification after decompression? */
++	unsigned char compress_algorithm;	/* backup algorithm type */
+ 	void *private;			/* payload buffer for specified decompression algorithm */
+ 	void *private2;			/* extra payload buffer */
+ 	struct work_struct verity_work;	/* work to verify the decompressed pages */
+diff --git a/fs/quota/dquot.c b/fs/quota/dquot.c
+index 0f82db69d2d8..0aa0ed754f2e 100644
+--- a/fs/quota/dquot.c
++++ b/fs/quota/dquot.c
+@@ -362,6 +362,31 @@ static inline int dquot_active(struct dquot *dquot)
+ 	return test_bit(DQ_ACTIVE_B, &dquot->dq_flags);
+ }
+ 
++static struct dquot *__dqgrab(struct dquot *dquot)
++{
++	lockdep_assert_held(&dq_list_lock);
++	if (!atomic_read(&dquot->dq_count))
++		remove_free_dquot(dquot);
++	atomic_inc(&dquot->dq_count);
++	return dquot;
++}
++
++/*
++ * Get reference to dquot when we got pointer to it by some other means. The
++ * dquot has to be active and the caller has to make sure it cannot get
++ * deactivated under our hands.
++ */
++struct dquot *dqgrab(struct dquot *dquot)
++{
++	spin_lock(&dq_list_lock);
++	WARN_ON_ONCE(!dquot_active(dquot));
++	dquot = __dqgrab(dquot);
++	spin_unlock(&dq_list_lock);
++
++	return dquot;
++}
++EXPORT_SYMBOL_GPL(dqgrab);
++
+ static inline int dquot_dirty(struct dquot *dquot)
+ {
+ 	return test_bit(DQ_MOD_B, &dquot->dq_flags);
+@@ -640,15 +665,14 @@ int dquot_scan_active(struct super_block *sb,
+ 			continue;
+ 		if (dquot->dq_sb != sb)
+ 			continue;
+-		/* Now we have active dquot so we can just increase use count */
+-		atomic_inc(&dquot->dq_count);
++		__dqgrab(dquot);
+ 		spin_unlock(&dq_list_lock);
+ 		dqput(old_dquot);
+ 		old_dquot = dquot;
+ 		/*
+ 		 * ->release_dquot() can be racing with us. Our reference
+-		 * protects us from new calls to it so just wait for any
+-		 * outstanding call and recheck the DQ_ACTIVE_B after that.
++		 * protects us from dquot_release() proceeding so just wait for
++		 * any outstanding call and recheck the DQ_ACTIVE_B after that.
+ 		 */
+ 		wait_on_dquot(dquot);
+ 		if (dquot_active(dquot)) {
+@@ -716,7 +740,7 @@ int dquot_writeback_dquots(struct super_block *sb, int type)
+ 			/* Now we have active dquot from which someone is
+  			 * holding reference so we can safely just increase
+ 			 * use count */
+-			dqgrab(dquot);
++			__dqgrab(dquot);
+ 			spin_unlock(&dq_list_lock);
+ 			err = dquot_write_dquot(dquot);
+ 			if (err && !ret)
+@@ -971,9 +995,7 @@ struct dquot *dqget(struct super_block *sb, struct kqid qid)
+ 		spin_unlock(&dq_list_lock);
+ 		dqstats_inc(DQST_LOOKUPS);
+ 	} else {
+-		if (!atomic_read(&dquot->dq_count))
+-			remove_free_dquot(dquot);
+-		atomic_inc(&dquot->dq_count);
++		__dqgrab(dquot);
+ 		spin_unlock(&dq_list_lock);
+ 		dqstats_inc(DQST_CACHE_HITS);
+ 		dqstats_inc(DQST_LOOKUPS);
+diff --git a/include/keys/request_key_auth-type.h b/include/keys/request_key_auth-type.h
+index 36b89a933310..01e42ee5f409 100644
+--- a/include/keys/request_key_auth-type.h
++++ b/include/keys/request_key_auth-type.h
+@@ -9,12 +9,14 @@
+ #define _KEYS_REQUEST_KEY_AUTH_TYPE_H
+ 
+ #include <linux/key.h>
++#include <linux/refcount.h>
+ 
+ /*
+  * Authorisation record for request_key().
+  */
+ struct request_key_auth {
+ 	struct rcu_head		rcu;
++	refcount_t		usage;
+ 	struct key		*target_key;
+ 	struct key		*dest_keyring;
+ 	const struct cred	*cred;
+diff --git a/include/linux/quotaops.h b/include/linux/quotaops.h
+index 3abd249ec337..7078e6f2429a 100644
+--- a/include/linux/quotaops.h
++++ b/include/linux/quotaops.h
+@@ -44,14 +44,7 @@ int dquot_initialize(struct inode *inode);
+ bool dquot_initialize_needed(struct inode *inode);
+ void dquot_drop(struct inode *inode);
+ struct dquot *dqget(struct super_block *sb, struct kqid qid);
+-static inline struct dquot *dqgrab(struct dquot *dquot)
+-{
+-	/* Make sure someone else has active reference to dquot */
+-	WARN_ON_ONCE(!atomic_read(&dquot->dq_count));
+-	WARN_ON_ONCE(!test_bit(DQ_ACTIVE_B, &dquot->dq_flags));
+-	atomic_inc(&dquot->dq_count);
+-	return dquot;
+-}
++struct dquot *dqgrab(struct dquot *dquot);
+ 
+ static inline bool dquot_is_busy(struct dquot *dquot)
+ {
+diff --git a/include/net/bluetooth/bluetooth.h b/include/net/bluetooth/bluetooth.h
+index 5689b4744764..05dc9832f9bb 100644
+--- a/include/net/bluetooth/bluetooth.h
++++ b/include/net/bluetooth/bluetooth.h
+@@ -361,6 +361,7 @@ void baswap(bdaddr_t *dst, const bdaddr_t *src);
+ struct bt_sock {
+ 	struct sock sk;
+ 	struct list_head accept_q;
++	spinlock_t accept_q_lock; /* protects accept_q */
+ 	struct sock *parent;
+ 	unsigned long flags;
+ 	void (*skb_msg_name)(struct sk_buff *, void *, int *);
+diff --git a/include/net/bluetooth/l2cap.h b/include/net/bluetooth/l2cap.h
+index d32f13f09e5e..8e7dc7b117df 100644
+--- a/include/net/bluetooth/l2cap.h
++++ b/include/net/bluetooth/l2cap.h
+@@ -34,6 +34,7 @@
+ /* L2CAP defaults */
+ #define L2CAP_DEFAULT_MTU		672
+ #define L2CAP_DEFAULT_MIN_MTU		48
++#define L2CAP_SIG_MTU			48	/* BR/EDR signaling MTU */
+ #define L2CAP_DEFAULT_FLUSH_TO		0xFFFF
+ #define L2CAP_EFS_DEFAULT_FLUSH_TO	0xFFFFFFFF
+ #define L2CAP_DEFAULT_TX_WINDOW		63
+diff --git a/include/net/mctp.h b/include/net/mctp.h
+index afeda2ad22d6..2da82878155b 100644
+--- a/include/net/mctp.h
++++ b/include/net/mctp.h
+@@ -26,6 +26,9 @@ struct mctp_hdr {
+ #define MCTP_VER_MIN	1
+ #define MCTP_VER_MAX	1
+ 
++/* Definitions for ver field */
++#define MCTP_HDR_VER_MASK	GENMASK(3, 0)
++
+ /* Definitions for flags_seq_tag field */
+ #define MCTP_HDR_FLAG_SOM	BIT(7)
+ #define MCTP_HDR_FLAG_EOM	BIT(6)
+diff --git a/include/net/tc_act/tc_pedit.h b/include/net/tc_act/tc_pedit.h
+index 83fe39931781..a26d4cd3b8d6 100644
+--- a/include/net/tc_act/tc_pedit.h
++++ b/include/net/tc_act/tc_pedit.h
+@@ -14,7 +14,6 @@ struct tcf_pedit_key_ex {
+ struct tcf_pedit_parms {
+ 	struct tc_pedit_key	*tcfp_keys;
+ 	struct tcf_pedit_key_ex	*tcfp_keys_ex;
+-	u32 tcfp_off_max_hint;
+ 	unsigned char tcfp_nkeys;
+ 	unsigned char tcfp_flags;
+ 	struct rcu_head rcu;
+diff --git a/include/ufs/ufshcd.h b/include/ufs/ufshcd.h
+index 56dd850eaa99..28bde2f15811 100644
+--- a/include/ufs/ufshcd.h
++++ b/include/ufs/ufshcd.h
+@@ -1291,7 +1291,6 @@ static inline void ufshcd_rmwl(struct ufs_hba *hba, u32 mask, u32 val, u32 reg)
+ }
+ 
+ int ufshcd_alloc_host(struct device *, struct ufs_hba **);
+-void ufshcd_dealloc_host(struct ufs_hba *);
+ int ufshcd_hba_enable(struct ufs_hba *hba);
+ int ufshcd_init(struct ufs_hba *, void __iomem *, unsigned int);
+ int ufshcd_link_recovery(struct ufs_hba *hba);
+diff --git a/net/bluetooth/l2cap_core.c b/net/bluetooth/l2cap_core.c
+index 4a298faf87bb..fd724afdf49b 100644
+--- a/net/bluetooth/l2cap_core.c
++++ b/net/bluetooth/l2cap_core.c
+@@ -5542,6 +5542,15 @@ static inline void l2cap_sig_send_rej(struct l2cap_conn *conn, u16 ident)
+ 	l2cap_send_cmd(conn, ident, L2CAP_COMMAND_REJ, sizeof(rej), &rej);
+ }
+ 
++static inline void l2cap_sig_send_mtu_rej(struct l2cap_conn *conn, u8 ident)
++{
++	struct l2cap_cmd_rej_mtu rej;
++
++	rej.reason = cpu_to_le16(L2CAP_REJ_MTU_EXCEEDED);
++	rej.max_mtu = cpu_to_le16(L2CAP_SIG_MTU);
++	l2cap_send_cmd(conn, ident, L2CAP_COMMAND_REJ, sizeof(rej), &rej);
++}
++
+ static inline void l2cap_sig_channel(struct l2cap_conn *conn,
+ 				     struct sk_buff *skb)
+ {
+@@ -5554,6 +5563,43 @@ static inline void l2cap_sig_channel(struct l2cap_conn *conn,
+ 	if (hcon->type != ACL_LINK)
+ 		goto drop;
+ 
++	/*
++	 * Bluetooth Core v5.4, Vol 3, Part A, Section 4: the BR/EDR
++	 * signaling channel has a fixed signaling MTU (MTUsig) whose
++	 * minimum and default is 48 octets.  Section 4.1 says that on
++	 * an MTUExceeded command reject the identifier "shall match
++	 * the first request command in the L2CAP packet" and that
++	 * packets containing only response commands "shall be
++	 * silently discarded".
++	 *
++	 * Linux intentionally deviates from that prescription:
++	 *
++	 *   1. Silently discarding desynchronizes the peer.  The
++	 *      remote stack never learns its responses were dropped,
++	 *      so any state machine waiting on a paired response
++	 *      stalls until its own timer fires.
++	 *
++	 *   2. Locating "the first request command" requires walking
++	 *      command headers past MTUsig, i.e. processing bytes
++	 *      from a packet we have already decided is too large to
++	 *      process.
++	 *
++	 * Reject every over-MTUsig signaling packet with one
++	 * L2CAP_REJ_MTU_EXCEEDED command reject.  The reject's
++	 * reason field is what tells the peer that the whole packet
++	 * was discarded; the identifier value is informational, so
++	 * we use the identifier from the first command header, a
++	 * single fixed-offset byte read.
++	 */
++	if (skb->len > L2CAP_SIG_MTU) {
++		u8 ident = skb->data[1];
++
++		BT_DBG("signaling packet exceeds MTU: %u > %u",
++		       skb->len, L2CAP_SIG_MTU);
++		l2cap_sig_send_mtu_rej(conn, ident);
++		goto drop;
++	}
++
+ 	while (skb->len >= L2CAP_CMD_HDR_SIZE) {
+ 		u16 len;
+ 
+diff --git a/net/l2tp/l2tp_core.c b/net/l2tp/l2tp_core.c
+index e60c45c361d7..ff856cc8a2ea 100644
+--- a/net/l2tp/l2tp_core.c
++++ b/net/l2tp/l2tp_core.c
+@@ -164,7 +164,7 @@ static void l2tp_session_free(struct l2tp_session *session)
+ {
+ 	trace_free_session(session);
+ 	if (session->tunnel)
+-		l2tp_tunnel_dec_refcount(session->tunnel);
++		l2tp_tunnel_put(session->tunnel);
+ 	kfree(session);
+ }
+ 
+@@ -180,31 +180,19 @@ struct l2tp_tunnel *l2tp_sk_to_tunnel(struct sock *sk)
+ }
+ EXPORT_SYMBOL_GPL(l2tp_sk_to_tunnel);
+ 
+-void l2tp_tunnel_inc_refcount(struct l2tp_tunnel *tunnel)
+-{
+-	refcount_inc(&tunnel->ref_count);
+-}
+-EXPORT_SYMBOL_GPL(l2tp_tunnel_inc_refcount);
+-
+-void l2tp_tunnel_dec_refcount(struct l2tp_tunnel *tunnel)
++void l2tp_tunnel_put(struct l2tp_tunnel *tunnel)
+ {
+ 	if (refcount_dec_and_test(&tunnel->ref_count))
+ 		l2tp_tunnel_free(tunnel);
+ }
+-EXPORT_SYMBOL_GPL(l2tp_tunnel_dec_refcount);
++EXPORT_SYMBOL_GPL(l2tp_tunnel_put);
+ 
+-void l2tp_session_inc_refcount(struct l2tp_session *session)
+-{
+-	refcount_inc(&session->ref_count);
+-}
+-EXPORT_SYMBOL_GPL(l2tp_session_inc_refcount);
+-
+-void l2tp_session_dec_refcount(struct l2tp_session *session)
++void l2tp_session_put(struct l2tp_session *session)
+ {
+ 	if (refcount_dec_and_test(&session->ref_count))
+ 		l2tp_session_free(session);
+ }
+-EXPORT_SYMBOL_GPL(l2tp_session_dec_refcount);
++EXPORT_SYMBOL_GPL(l2tp_session_put);
+ 
+ /* Lookup a tunnel. A new reference is held on the returned tunnel. */
+ struct l2tp_tunnel *l2tp_tunnel_get(const struct net *net, u32 tunnel_id)
+@@ -325,7 +313,7 @@ struct l2tp_session *l2tp_session_get_by_ifname(const struct net *net,
+ 	for (hash = 0; hash < L2TP_HASH_SIZE_2; hash++) {
+ 		hlist_for_each_entry_rcu(session, &pn->l2tp_session_hlist[hash], global_hlist) {
+ 			if (!strcmp(session->ifname, ifname)) {
+-				l2tp_session_inc_refcount(session);
++				refcount_inc(&session->ref_count);
+ 				rcu_read_unlock_bh();
+ 
+ 				return session;
+@@ -379,12 +367,12 @@ int l2tp_session_register(struct l2tp_session *session,
+ 				goto err_tlock_pnlock;
+ 			}
+ 
+-		l2tp_tunnel_inc_refcount(tunnel);
++		refcount_inc(&tunnel->ref_count);
+ 		hlist_add_head_rcu(&session->global_hlist, g_head);
+ 
+ 		spin_unlock_bh(&pn->l2tp_session_hlist_lock);
+ 	} else {
+-		l2tp_tunnel_inc_refcount(tunnel);
++		refcount_inc(&tunnel->ref_count);
+ 	}
+ 
+ 	hlist_add_head_rcu(&session->hlist, head);
+@@ -863,7 +851,7 @@ static int l2tp_udp_recv_core(struct l2tp_tunnel *tunnel, struct sk_buff *skb)
+ 	session = l2tp_tunnel_get_session(tunnel, session_id);
+ 	if (!session || !session->recv_skb) {
+ 		if (session)
+-			l2tp_session_dec_refcount(session);
++			l2tp_session_put(session);
+ 
+ 		/* Not found? Pass to userspace to deal with */
+ 		pr_debug_ratelimited("%s: no session found (%u/%u). Passing up.\n",
+@@ -873,12 +861,12 @@ static int l2tp_udp_recv_core(struct l2tp_tunnel *tunnel, struct sk_buff *skb)
+ 
+ 	if (tunnel->version == L2TP_HDR_VER_3 &&
+ 	    l2tp_v3_ensure_opt_in_linear(session, skb, &ptr, &optr)) {
+-		l2tp_session_dec_refcount(session);
++		l2tp_session_put(session);
+ 		goto invalid;
+ 	}
+ 
+ 	l2tp_recv_common(session, skb, ptr, optr, hdrflags, length);
+-	l2tp_session_dec_refcount(session);
++	l2tp_session_put(session);
+ 
+ 	return 0;
+ 
+@@ -1267,10 +1255,10 @@ static void l2tp_tunnel_del_work(struct work_struct *work)
+ 
+ 	l2tp_tunnel_remove(tunnel->l2tp_net, tunnel);
+ 	/* drop initial ref */
+-	l2tp_tunnel_dec_refcount(tunnel);
++	l2tp_tunnel_put(tunnel);
+ 
+ 	/* drop workqueue ref */
+-	l2tp_tunnel_dec_refcount(tunnel);
++	l2tp_tunnel_put(tunnel);
+ }
+ 
+ /* Create a socket for the tunnel, if one isn't set up by
+@@ -1550,7 +1538,7 @@ void l2tp_tunnel_delete(struct l2tp_tunnel *tunnel)
+ {
+ 	if (!test_and_set_bit(0, &tunnel->dead)) {
+ 		trace_delete_tunnel(tunnel);
+-		l2tp_tunnel_inc_refcount(tunnel);
++		refcount_inc(&tunnel->ref_count);
+ 		queue_work(l2tp_wq, &tunnel->del_work);
+ 	}
+ }
+@@ -1567,7 +1555,7 @@ void l2tp_session_delete(struct l2tp_session *session)
+ 	if (session->session_close)
+ 		(*session->session_close)(session);
+ 
+-	l2tp_session_dec_refcount(session);
++	l2tp_session_put(session);
+ }
+ EXPORT_SYMBOL_GPL(l2tp_session_delete);
+ 
+diff --git a/net/l2tp/l2tp_core.h b/net/l2tp/l2tp_core.h
+index a88e070b431d..60aadf9e3c51 100644
+--- a/net/l2tp/l2tp_core.h
++++ b/net/l2tp/l2tp_core.h
+@@ -213,10 +213,8 @@ static inline void *l2tp_session_priv(struct l2tp_session *session)
+ }
+ 
+ /* Tunnel and session refcounts */
+-void l2tp_tunnel_inc_refcount(struct l2tp_tunnel *tunnel);
+-void l2tp_tunnel_dec_refcount(struct l2tp_tunnel *tunnel);
+-void l2tp_session_inc_refcount(struct l2tp_session *session);
+-void l2tp_session_dec_refcount(struct l2tp_session *session);
++void l2tp_tunnel_put(struct l2tp_tunnel *tunnel);
++void l2tp_session_put(struct l2tp_session *session);
+ 
+ /* Tunnel and session lookup.
+  * These functions take a reference on the instances they return, so
+diff --git a/net/l2tp/l2tp_ppp.c b/net/l2tp/l2tp_ppp.c
+index 3a5094be73ba..9c61d0d67873 100644
+--- a/net/l2tp/l2tp_ppp.c
++++ b/net/l2tp/l2tp_ppp.c
+@@ -415,7 +415,7 @@ static void pppol2tp_session_destruct(struct sock *sk)
+ 		sk->sk_user_data = NULL;
+ 		if (WARN_ON(session->magic != L2TP_SESSION_MAGIC))
+ 			return;
+-		l2tp_session_dec_refcount(session);
++		l2tp_session_put(session);
+ 	}
+ }
+ 
+@@ -685,7 +685,7 @@ static struct l2tp_tunnel *pppol2tp_tunnel_get(struct net *net,
+ 			if (error < 0)
+ 				return ERR_PTR(error);
+ 
+-			l2tp_tunnel_inc_refcount(tunnel);
++			refcount_inc(&tunnel->ref_count);
+ 			error = l2tp_tunnel_register(tunnel, net, &tcfg);
+ 			if (error < 0) {
+ 				kfree(tunnel);
+@@ -701,7 +701,7 @@ static struct l2tp_tunnel *pppol2tp_tunnel_get(struct net *net,
+ 
+ 		/* Error if socket is not prepped */
+ 		if (!tunnel->sock) {
+-			l2tp_tunnel_dec_refcount(tunnel);
++			l2tp_tunnel_put(tunnel);
+ 			return ERR_PTR(-ENOENT);
+ 		}
+ 	}
+@@ -788,7 +788,7 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
+ 
+ 		pppol2tp_session_init(session);
+ 		ps = l2tp_session_priv(session);
+-		l2tp_session_inc_refcount(session);
++		refcount_inc(&session->ref_count);
+ 
+ 		mutex_lock(&ps->sk_lock);
+ 		error = l2tp_session_register(session, tunnel);
+@@ -849,8 +849,8 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
+ 			l2tp_tunnel_delete(tunnel);
+ 	}
+ 	if (drop_refcnt)
+-		l2tp_session_dec_refcount(session);
+-	l2tp_tunnel_dec_refcount(tunnel);
++		l2tp_session_put(session);
++	l2tp_tunnel_put(tunnel);
+ 	release_sock(sk);
+ 
+ 	return error;
+@@ -1050,12 +1050,12 @@ static int pppol2tp_tunnel_copy_stats(struct pppol2tp_ioc_stats *stats,
+ 		return -EBADR;
+ 
+ 	if (session->pwtype != L2TP_PWTYPE_PPP) {
+-		l2tp_session_dec_refcount(session);
++		l2tp_session_put(session);
+ 		return -EBADR;
+ 	}
+ 
+ 	pppol2tp_copy_stats(stats, &session->stats);
+-	l2tp_session_dec_refcount(session);
++	l2tp_session_put(session);
+ 
+ 	return 0;
+ }
+@@ -1438,7 +1438,7 @@ static void pppol2tp_next_tunnel(struct net *net, struct pppol2tp_seq_data *pd)
+ {
+ 	/* Drop reference taken during previous invocation */
+ 	if (pd->tunnel)
+-		l2tp_tunnel_dec_refcount(pd->tunnel);
++		l2tp_tunnel_put(pd->tunnel);
+ 
+ 	for (;;) {
+ 		pd->tunnel = l2tp_tunnel_get_nth(net, pd->tunnel_idx);
+@@ -1448,7 +1448,7 @@ static void pppol2tp_next_tunnel(struct net *net, struct pppol2tp_seq_data *pd)
+ 		if (!pd->tunnel || pd->tunnel->version == 2)
+ 			return;
+ 
+-		l2tp_tunnel_dec_refcount(pd->tunnel);
++		l2tp_tunnel_put(pd->tunnel);
+ 	}
+ }
+ 
+@@ -1456,7 +1456,7 @@ static void pppol2tp_next_session(struct net *net, struct pppol2tp_seq_data *pd)
+ {
+ 	/* Drop reference taken during previous invocation */
+ 	if (pd->session)
+-		l2tp_session_dec_refcount(pd->session);
++		l2tp_session_put(pd->session);
+ 
+ 	pd->session = l2tp_session_get_nth(pd->tunnel, pd->session_idx);
+ 	pd->session_idx++;
+@@ -1514,11 +1514,11 @@ static void pppol2tp_seq_stop(struct seq_file *p, void *v)
+ 	 * or pppol2tp_next_tunnel().
+ 	 */
+ 	if (pd->session) {
+-		l2tp_session_dec_refcount(pd->session);
++		l2tp_session_put(pd->session);
+ 		pd->session = NULL;
+ 	}
+ 	if (pd->tunnel) {
+-		l2tp_tunnel_dec_refcount(pd->tunnel);
++		l2tp_tunnel_put(pd->tunnel);
+ 		pd->tunnel = NULL;
+ 	}
+ }
+diff --git a/net/packet/af_packet.c b/net/packet/af_packet.c
+index 4e66da86a4d7..61b6215ad1fe 100644
+--- a/net/packet/af_packet.c
++++ b/net/packet/af_packet.c
+@@ -2723,7 +2723,7 @@ static int tpacket_parse_header(struct packet_sock *po, void *frame,
+ 		return -EMSGSIZE;
+ 	}
+ 
+-	if (unlikely(po->tp_tx_has_off)) {
++	if (unlikely(packet_sock_flag(po, PACKET_SOCK_TX_HAS_OFF))) {
+ 		int off_min, off_max;
+ 
+ 		off_min = po->tp_hdrlen - sizeof(struct sockaddr_ll);
+@@ -4064,7 +4064,7 @@ packet_setsockopt(struct socket *sock, int level, int optname, sockptr_t optval,
+ 
+ 		lock_sock(sk);
+ 		if (!po->rx_ring.pg_vec && !po->tx_ring.pg_vec)
+-			po->tp_tx_has_off = !!val;
++			packet_sock_flag_set(po, PACKET_SOCK_TX_HAS_OFF, val);
+ 
+ 		release_sock(sk);
+ 		return 0;
+@@ -4191,7 +4191,7 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
+ 		lv = sizeof(rstats);
+ 		break;
+ 	case PACKET_TX_HAS_OFF:
+-		val = po->tp_tx_has_off;
++		val = packet_sock_flag(po, PACKET_SOCK_TX_HAS_OFF);
+ 		break;
+ 	case PACKET_QDISC_BYPASS:
+ 		val = packet_use_direct_xmit(po);
+diff --git a/net/packet/internal.h b/net/packet/internal.h
+index b2edfe6fc8e7..31bac09a6872 100644
+--- a/net/packet/internal.h
++++ b/net/packet/internal.h
+@@ -119,8 +119,7 @@ struct packet_sock {
+ 	unsigned long		flags;
+ 	unsigned int		running;	/* bind_lock must be held */
+ 	unsigned int		has_vnet_hdr:1, /* writer must hold sock lock */
+-				tp_loss:1,
+-				tp_tx_has_off:1;
++				tp_loss:1;
+ 	int			pressure;
+ 	int			ifindex;	/* bound device		*/
+ 	__be16			num;
+@@ -146,6 +145,7 @@ static inline struct packet_sock *pkt_sk(struct sock *sk)
+ enum packet_sock_flags {
+ 	PACKET_SOCK_ORIGDEV,
+ 	PACKET_SOCK_AUXDATA,
++	PACKET_SOCK_TX_HAS_OFF,
+ };
+ 
+ static inline void packet_sock_flag_set(struct packet_sock *po,
+diff --git a/security/keys/internal.h b/security/keys/internal.h
+index ec2ec335b613..b919495243e7 100644
+--- a/security/keys/internal.h
++++ b/security/keys/internal.h
+@@ -215,6 +215,8 @@ extern struct key *request_key_auth_new(struct key *target,
+ 					const void *callout_info,
+ 					size_t callout_len,
+ 					struct key *dest_keyring);
++struct request_key_auth *request_key_auth_get(struct key *authkey);
++void request_key_auth_put(struct request_key_auth *rka);
+ 
+ extern struct key *key_get_instantiation_authkey(key_serial_t target_id);
+ 
+diff --git a/security/keys/keyctl.c b/security/keys/keyctl.c
+index aa1dc43b16dd..127c17191785 100644
+--- a/security/keys/keyctl.c
++++ b/security/keys/keyctl.c
+@@ -1196,9 +1196,13 @@ static long keyctl_instantiate_key_common(key_serial_t id,
+ 	if (!instkey)
+ 		goto error;
+ 
+-	rka = instkey->payload.data[0];
+-	if (rka->target_key->serial != id)
++	rka = request_key_auth_get(instkey);
++	if (!rka) {
++		ret = -EKEYREVOKED;
+ 		goto error;
++	}
++	if (rka->target_key->serial != id)
++		goto error_put_rka;
+ 
+ 	/* pull the payload in if one was supplied */
+ 	payload = NULL;
+@@ -1207,7 +1211,7 @@ static long keyctl_instantiate_key_common(key_serial_t id,
+ 		ret = -ENOMEM;
+ 		payload = kvmalloc(plen, GFP_KERNEL);
+ 		if (!payload)
+-			goto error;
++			goto error_put_rka;
+ 
+ 		ret = -EFAULT;
+ 		if (!copy_from_iter_full(payload, plen, from))
+@@ -1233,6 +1237,8 @@ static long keyctl_instantiate_key_common(key_serial_t id,
+ 
+ error2:
+ 	kvfree_sensitive(payload, plen);
++error_put_rka:
++	request_key_auth_put(rka);
+ error:
+ 	return ret;
+ }
+@@ -1358,15 +1364,19 @@ long keyctl_reject_key(key_serial_t id, unsigned timeout, unsigned error,
+ 	if (!instkey)
+ 		goto error;
+ 
+-	rka = instkey->payload.data[0];
+-	if (rka->target_key->serial != id)
++	rka = request_key_auth_get(instkey);
++	if (!rka) {
++		ret = -EKEYREVOKED;
+ 		goto error;
++	}
++	if (rka->target_key->serial != id)
++		goto error_put_rka;
+ 
+ 	/* find the destination keyring if present (which must also be
+ 	 * writable) */
+ 	ret = get_instantiation_keyring(ringid, rka, &dest_keyring);
+ 	if (ret < 0)
+-		goto error;
++		goto error_put_rka;
+ 
+ 	/* instantiate the key and link it into a keyring */
+ 	ret = key_reject_and_link(rka->target_key, timeout, error,
+@@ -1379,6 +1389,8 @@ long keyctl_reject_key(key_serial_t id, unsigned timeout, unsigned error,
+ 	if (ret == 0)
+ 		keyctl_change_reqkey_auth(NULL);
+ 
++error_put_rka:
++	request_key_auth_put(rka);
+ error:
+ 	return ret;
+ }
+diff --git a/security/keys/request_key_auth.c b/security/keys/request_key_auth.c
+index 41e9735006d0..20f3f1f4893e 100644
+--- a/security/keys/request_key_auth.c
++++ b/security/keys/request_key_auth.c
+@@ -23,6 +23,7 @@ static void request_key_auth_describe(const struct key *, struct seq_file *);
+ static void request_key_auth_revoke(struct key *);
+ static void request_key_auth_destroy(struct key *);
+ static long request_key_auth_read(const struct key *, char *, size_t);
++static void request_key_auth_rcu_disposal(struct rcu_head *);
+ 
+ /*
+  * The request-key authorisation key type definition.
+@@ -115,6 +116,31 @@ static void free_request_key_auth(struct request_key_auth *rka)
+ 	kfree(rka);
+ }
+ 
++/*
++ * Take a reference to the request-key authorisation payload so callers can
++ * drop authkey->sem before doing operations that may sleep.
++ */
++struct request_key_auth *request_key_auth_get(struct key *authkey)
++{
++	struct request_key_auth *rka;
++
++	down_read(&authkey->sem);
++	rka = dereference_key_locked(authkey);
++	if (rka && !test_bit(KEY_FLAG_REVOKED, &authkey->flags))
++		refcount_inc(&rka->usage);
++	else
++		rka = NULL;
++	up_read(&authkey->sem);
++
++	return rka;
++}
++
++void request_key_auth_put(struct request_key_auth *rka)
++{
++	if (rka && refcount_dec_and_test(&rka->usage))
++		call_rcu(&rka->rcu, request_key_auth_rcu_disposal);
++}
++
+ /*
+  * Dispose of the request_key_auth record under RCU conditions
+  */
+@@ -136,8 +162,10 @@ static void request_key_auth_revoke(struct key *key)
+ 	struct request_key_auth *rka = dereference_key_locked(key);
+ 
+ 	kenter("{%d}", key->serial);
++	if (!rka)
++		return;
+ 	rcu_assign_keypointer(key, NULL);
+-	call_rcu(&rka->rcu, request_key_auth_rcu_disposal);
++	request_key_auth_put(rka);
+ }
+ 
+ /*
+@@ -150,7 +178,7 @@ static void request_key_auth_destroy(struct key *key)
+ 	kenter("{%d}", key->serial);
+ 	if (rka) {
+ 		rcu_assign_keypointer(key, NULL);
+-		call_rcu(&rka->rcu, request_key_auth_rcu_disposal);
++		request_key_auth_put(rka);
+ 	}
+ }
+ 
+@@ -174,6 +202,7 @@ struct key *request_key_auth_new(struct key *target, const char *op,
+ 	rka = kzalloc(sizeof(*rka), GFP_KERNEL);
+ 	if (!rka)
+ 		goto error;
++	refcount_set(&rka->usage, 1);
+ 	rka->callout_info = kmemdup(callout_info, callout_len, GFP_KERNEL);
+ 	if (!rka->callout_info)
+ 		goto error_free_rka;
+diff --git a/sound/usb/quirks.c b/sound/usb/quirks.c
+index b2a612c5b299..f9e6b8665ca2 100755
+--- a/sound/usb/quirks.c
++++ b/sound/usb/quirks.c
+@@ -121,7 +121,7 @@ static int add_audio_stream_from_fixed_fmt(struct snd_usb_audio *chip,
+ 
+ 	snd_usb_audioformat_set_sync_ep(chip, fp);
+ 
+-	err = snd_usb_add_audio_stream(chip, stream, fp);
++	err = snd_usb_add_audio_stream(chip, stream, fp, NULL);
+ 	if (err < 0)
+ 		return err;
+ 
+diff --git a/sound/usb/stream.c b/sound/usb/stream.c
+index 556669e88249..775cf587c6cf 100644
+--- a/sound/usb/stream.c
++++ b/sound/usb/stream.c
+@@ -79,7 +79,7 @@ static void snd_usb_audio_pcm_free(struct snd_pcm *pcm)
+ static void snd_usb_init_substream(struct snd_usb_stream *as,
+ 				   int stream,
+ 				   struct audioformat *fp,
+-				   struct snd_usb_power_domain *pd)
++				   struct snd_usb_power_domain **pdptr)
+ {
+ 	struct snd_usb_substream *subs = &as->substream[stream];
+ 
+@@ -105,10 +105,11 @@ static void snd_usb_init_substream(struct snd_usb_stream *as,
+ 	if (fp->channels > subs->channels_max)
+ 		subs->channels_max = fp->channels;
+ 
+-	if (pd) {
+-		subs->str_pd = pd;
++	if (pdptr && *pdptr) {
++		subs->str_pd = *pdptr;
++		*pdptr = NULL; /* assigned */
+ 		/* Initialize Power Domain to idle status D1 */
+-		snd_usb_power_domain_set(subs->stream->chip, pd,
++		snd_usb_power_domain_set(subs->stream->chip, subs->str_pd,
+ 					 UAC3_PD_STATE_D1);
+ 	}
+ 
+@@ -475,11 +476,14 @@ snd_pcm_chmap_elem *convert_chmap_v3(struct uac3_cluster_header_descriptor
+  * if not, create a new pcm stream. note, fp is added to the substream
+  * fmt_list and will be freed on the chip instance release. do not free
+  * fp or do remove it from the substream fmt_list to avoid double-free.
++ *
++ * pdptr is optional and can be NULL.  When it's non-NULL and the PD gets
++ * assigned to the stream, *pdptr is cleared to NULL upon return.
+  */
+-static int __snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+-				      int stream,
+-				      struct audioformat *fp,
+-				      struct snd_usb_power_domain *pd)
++int snd_usb_add_audio_stream(struct snd_usb_audio *chip,
++			     int stream,
++			     struct audioformat *fp,
++			     struct snd_usb_power_domain **pdptr)
+ 
+ {
+ 	struct snd_usb_stream *as;
+@@ -512,7 +516,7 @@ static int __snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+ 		err = snd_pcm_new_stream(as->pcm, stream, 1);
+ 		if (err < 0)
+ 			return err;
+-		snd_usb_init_substream(as, stream, fp, pd);
++		snd_usb_init_substream(as, stream, fp, pdptr);
+ 		return add_chmap(as->pcm, stream, subs);
+ 	}
+ 
+@@ -540,7 +544,7 @@ static int __snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+ 	else
+ 		strcpy(pcm->name, "USB Audio");
+ 
+-	snd_usb_init_substream(as, stream, fp, pd);
++	snd_usb_init_substream(as, stream, fp, pdptr);
+ 
+ 	/*
+ 	 * Keep using head insertion for M-Audio Audiophile USB (tm) which has a
+@@ -558,21 +562,6 @@ static int __snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+ 	return add_chmap(pcm, stream, &as->substream[stream]);
+ }
+ 
+-int snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+-			     int stream,
+-			     struct audioformat *fp)
+-{
+-	return __snd_usb_add_audio_stream(chip, stream, fp, NULL);
+-}
+-
+-static int snd_usb_add_audio_stream_v3(struct snd_usb_audio *chip,
+-				       int stream,
+-				       struct audioformat *fp,
+-				       struct snd_usb_power_domain *pd)
+-{
+-	return __snd_usb_add_audio_stream(chip, stream, fp, pd);
+-}
+-
+ static int parse_uac_endpoint_attributes(struct snd_usb_audio *chip,
+ 					 struct usb_host_interface *alts,
+ 					 int protocol, int iface_no)
+@@ -1079,8 +1068,7 @@ snd_usb_get_audioformat_uac3(struct snd_usb_audio *chip,
+ 		}
+ 	}
+ 
+-	if (pd)
+-		*pd_out = pd;
++	*pd_out = pd;
+ 
+ 	return fp;
+ }
+@@ -1095,7 +1083,6 @@ static int __snd_usb_parse_audio_interface(struct snd_usb_audio *chip,
+ 	struct usb_interface_descriptor *altsd;
+ 	int i, altno, err, stream;
+ 	struct audioformat *fp = NULL;
+-	struct snd_usb_power_domain *pd = NULL;
+ 	bool set_iface_first;
+ 	int num, protocol;
+ 
+@@ -1137,6 +1124,12 @@ static int __snd_usb_parse_audio_interface(struct snd_usb_audio *chip,
+ 		if (snd_usb_apply_interface_quirk(chip, iface_no, altno))
+ 			continue;
+ 
++		/* pd may be allocated at snd_usb_get_audioformat_uac3() and
++		 * assigned at snd_usb_add_audio_stream(); otherwise it'll be
++		 * freed automatically by cleanup at each loop.
++		 */
++		struct snd_usb_power_domain *pd __free(kfree) = NULL;
++
+ 		/*
+ 		 * Roland audio streaming interfaces are marked with protocols
+ 		 * 0/1/2, but are UAC 1 compatible.
+@@ -1192,23 +1185,16 @@ static int __snd_usb_parse_audio_interface(struct snd_usb_audio *chip,
+ 			*has_non_pcm = true;
+ 		if ((fp->fmt_type == UAC_FORMAT_TYPE_I) == non_pcm) {
+ 			audioformat_free(fp);
+-			kfree(pd);
+ 			fp = NULL;
+-			pd = NULL;
+ 			continue;
+ 		}
+ 
+ 		snd_usb_audioformat_set_sync_ep(chip, fp);
+ 
+ 		dev_dbg(&dev->dev, "%u:%d: add audio endpoint %#x\n", iface_no, altno, fp->endpoint);
+-		if (protocol == UAC_VERSION_3)
+-			err = snd_usb_add_audio_stream_v3(chip, stream, fp, pd);
+-		else
+-			err = snd_usb_add_audio_stream(chip, stream, fp);
+-
++		err = snd_usb_add_audio_stream(chip, stream, fp, &pd);
+ 		if (err < 0) {
+ 			audioformat_free(fp);
+-			kfree(pd);
+ 			return err;
+ 		}
+ 
+diff --git a/sound/usb/stream.h b/sound/usb/stream.h
+index d92e18d5818f..61b9a133da01 100644
+--- a/sound/usb/stream.h
++++ b/sound/usb/stream.h
+@@ -7,7 +7,8 @@ int snd_usb_parse_audio_interface(struct snd_usb_audio *chip,
+ 
+ int snd_usb_add_audio_stream(struct snd_usb_audio *chip,
+ 			     int stream,
+-			     struct audioformat *fp);
++			     struct audioformat *fp,
++			     struct snd_usb_power_domain **pdptr);
+ 
+ #endif /* __USBAUDIO_STREAM_H */
+ 

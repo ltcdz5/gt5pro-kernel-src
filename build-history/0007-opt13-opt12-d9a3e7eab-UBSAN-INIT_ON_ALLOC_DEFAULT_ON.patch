@@ -1,0 +1,30 @@
+From 4e03a7d254095eb51fe3c370b5d22e05d21a80bb Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@users.noreply.github.com>
+Date: Wed, 30 Sep 2026 22:06:45 +0800
+Subject: [PATCH 07/33] =?UTF-8?q?opt13=20=3D=20opt12(d9a3e7eab)=20+=20?=
+ =?UTF-8?q?=E5=87=8F=E8=84=82=E4=B8=89=E9=A1=B9(UBSAN=20=E5=85=A8=E5=85=B3?=
+ =?UTF-8?q?=20/=20INIT=5FON=5FALLOC=5FDEFAULT=5FON=20=E5=85=B3=20/=20KFENC?=
+ =?UTF-8?q?E=20=E9=87=87=E6=A0=B7=E9=97=B4=E9=9A=94=200)=EF=BC=8C=E5=90=8E?=
+ =?UTF-8?q?=E7=BC=80=20-opt13=EF=BC=9Bconfig=20=E5=B7=AE=2018=20=E8=A1=8C?=
+ =?UTF-8?q?=E5=85=A8=E9=83=A8=E5=B1=9E=E8=BF=99=E4=B8=89=E9=A1=B9=E5=8F=8A?=
+ =?UTF-8?q?=E5=85=B6=E4=BE=9D=E8=B5=96=EF=BC=8C=E5=AF=BC=E5=87=BA=E7=AC=A6?=
+ =?UTF-8?q?=E5=8F=B7=E5=9F=BA=E5=87=86=2015388=20=E4=B8=AA=E4=B8=8D?=
+ =?UTF-8?q?=E5=8F=98?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ scripts/setlocalversion | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index c6f35375b180..9388dc6026e6 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-opt12"
++echo "-android14-11-o-ltcdz5-opt13"
