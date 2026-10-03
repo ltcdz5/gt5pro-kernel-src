@@ -1,150 +1,63 @@
-# How do I submit patches to Android Common Kernels
+<!-- badges -->
+[![License](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
+[![Device](https://img.shields.io/badge/Device-Realme%20GT5%20Pro%20(RMX3888)-orange.svg)](https://github.com/ltcdz5/gt5pro-kernel-src)
+[![SoC](https://img.shields.io/badge/SoC-Snapdragon%208%20Gen%203%20(SM8650)-0a7bbb.svg)]()
+[![Kernel](https://img.shields.io/badge/Kernel-Linux%206.1.141%20OKI-f6a500.svg)]()
+[![Android](https://img.shields.io/badge/Android-16%20(ColorOS%2FRUI)-3ddc84.svg)]()
+[![Status](https://img.shields.io/badge/Status-Open%20Source%20%C2%B7%20Public-2ea44f.svg)]()
 
-1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
-   These patches will be merged automatically in the corresponding common kernels. If the patch is already
-   in upstream Linux, post a backport of the patch that conforms to the patch requirements below.
-   - Do not send patches upstream that contain only symbol exports. To be considered for upstream Linux,
-additions of `EXPORT_SYMBOL_GPL()` require an in-tree modular driver that uses the symbol -- so include
-the new driver or changes to an existing driver in the same patchset as the export.
-   - When sending patches upstream, the commit message must contain a clear case for why the patch
-is needed and beneficial to the community. Enabling out-of-tree drivers or functionality is not
-not a persuasive case.
+# GT5 Pro 自编内核源码树
 
-2. LESS GOOD: Develop your patches out-of-tree (from an upstream Linux point-of-view). Unless these are
-   fixing an Android-specific bug, these are very unlikely to be accepted unless they have been
-   coordinated with kernel-team@android.com. If you want to proceed, post a patch that conforms to the
-   patch requirements below.
+**真我 GT5 Pro（RMX3888 · SM8650 "pineapple" · Android 16 / ColorOS）** 的自编内核源码树。
 
-# Common Kernel patch requirements
+> **开源状态**：本仓库以 **GPL-2.0** 开源（许可证全文见 [`LICENSE`](LICENSE)，内核原有声明见 [`COPYING`](COPYING)）。
+> **配套仓库**：[`ltcdz5/gt5pro-kernel-kit`](https://github.com/ltcdz5/gt5pro-kernel-kit) —— 构建脚本、双闸门、完整工作台账。
 
-- All patches must conform to the Linux kernel coding standards and pass `scripts/checkpatch.pl`
-- Patches shall not break gki_defconfig or allmodconfig builds for arm, arm64, x86, x86_64 architectures
-(see  https://source.android.com/setup/build/building-kernels)
-- If the patch is not merged from an upstream branch, the subject must be tagged with the type of patch:
-`UPSTREAM:`, `BACKPORT:`, `FROMGIT:`, `FROMLIST:`, or `ANDROID:`.
-- All patches must have a `Change-Id:` tag (see https://gerrit-review.googlesource.com/Documentation/user-changeid.html)
-- If an Android bug has been assigned, there must be a `Bug:` tag.
-- All patches must have a `Signed-off-by:` tag by the author and the submitter
+---
 
-Additional requirements are listed below based on patch type
+## ⚠️ 复刻 / 衍生 / 借鉴来源（合规标注）
 
-## Requirements for backports from mainline Linux: `UPSTREAM:`, `BACKPORT:`
+**本仓库是复刻/衍生项目，不是原创内核。** 各层来源与许可如下，**使用时务必遵守对应许可**：
 
-- If the patch is a cherry-pick from Linux mainline with no changes at all
-    - tag the patch subject with `UPSTREAM:`.
-    - add upstream commit information with a `(cherry picked from commit ...)` line
-    - Example:
-        - if the upstream commit message is
-```
-        important patch from upstream
+| 层级 | 来源 | 许可 | 说明 |
+|---|---|---|---|
+| GKI 基底 | **AOSP `kernel/common`**（`android14-6.1`）<br>`https://android.googlesource.com/kernel/common` | GPL-2.0 | Google 通用内核（GKI） |
+| 厂商源码 | **OPPO / oplus 官方开源** `android_kernel_common_oneplus_sm8650` | GPL-2.0 | 本仓库的**直接基座**（一加/OPPO/真我 SM8650 共用树） |
+| 流程参考 | **`cctv18/oppo_oplus_realme_sm8650`** | GPL-2.0 | 同设备家族自动化编译项目；版本命名与构建流程有所*借鉴* |
+| Root / 隐藏 | `tiann/KernelSU`、`ReSukiSU`、`SukiSU-Ultra`、`ShirkNeko/susfs4ksu` | GPL-2.0 | 以 LKM 形式集成，*引用*其内核补丁 |
+| 内核补丁 | `ferstar`（lz4 1.10.0 / zstd 1.5.7，移植 by `Xiaomichael`） | 见上游 | *引用*其补丁 |
+| IO 调度器 | 三星 SSG（社区整理移植） | GPL-2.0 | *借鉴* |
+| 调度扩展 | **LunarKernel（LSE）** | 见上游 | *借鉴*其 slim_walt 模块化路线（未含其代码） |
 
-        This is the detailed description of the important patch
+> 逐项完整标注见 [`NOTICE.md`](NOTICE.md)。
+> **本仓库未包含任何厂商闭源 blob**；对厂商源码的全部修改均以 GPL-2.0 公开。
 
-        Signed-off-by: Fred Jones <fred.jones@foo.org>
-```
->- then Joe Smith would upload the patch for the common kernel as
-```
-        UPSTREAM: important patch from upstream
+---
 
-        This is the detailed description of the important patch
+## 本仓库相对上游的改动
 
-        Signed-off-by: Fred Jones <fred.jones@foo.org>
+在厂商源码之上应用的内核补丁与配置取舍（缺陷修复、CVE 回移、config 精简等），
+**每一版的改动、验证过程与结论**都记录在配套仓库的台账里：
 
-        Bug: 135791357
-        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
-        (cherry picked from commit c31e73121f4c1ec41143423ac6ce3ce6dafdcec1)
-        Signed-off-by: Joe Smith <joe.smith@foo.org>
-```
+- 构建与闸门脚本、坑清单：`gt5pro-kernel-kit`
+- 每版上机核验报告：`gt5pro-kernel-kit/v1.1-opt*-上机核验-*.md`
 
-- If the patch requires any changes from the upstream version, tag the patch with `BACKPORT:`
-instead of `UPSTREAM:`.
-    - use the same tags as `UPSTREAM:`
-    - add comments about the changes under the `(cherry picked from commit ...)` line
-    - Example:
-```
-        BACKPORT: important patch from upstream
+**版本命名**：`6.1.141-android14-11-o-ltcdz5-v<族>.<次>-opt<构建序>`
+（例：`6.1.141-android14-11-o-ltcdz5-v1.1-opt42`）
 
-        This is the detailed description of the important patch
+## 刷写须知（重要）
 
-        Signed-off-by: Fred Jones <fred.jones@foo.org>
+本机为 **A/B 虚拟分区 + 解锁 BL**，实践约定：
 
-        Bug: 135791357
-        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
-        (cherry picked from commit c31e73121f4c1ec41143423ac6ce3ce6dafdcec1)
-        [joe: Resolved minor conflict in drivers/foo/bar.c ]
-        Signed-off-by: Joe Smith <joe.smith@foo.org>
-```
+- **只刷 `boot_a`**。永不触碰 `init_boot` / `devinfo` / `abl` / `xbl` / `vbmeta` / `super` / `userdata` / `boot_b`。
+- `fastboot flash` 会改变活动槽位 ⇒ **必须紧跟 `fastboot set_active a`**。
+- 自编内核的 vbmeta 未重签 ⇒ 仅在**解锁 BL** 的设备上可用。
 
-## Requirements for other backports: `FROMGIT:`, `FROMLIST:`,
+## 上游提交规范
 
-- If the patch has been merged into an upstream maintainer tree, but has not yet
-been merged into Linux mainline
-    - tag the patch subject with `FROMGIT:`
-    - add info on where the patch came from as `(cherry picked from commit <sha1> <repo> <branch>)`. This
-must be a stable maintainer branch (not rebased, so don't use `linux-next` for example).
-    - if changes were required, use `BACKPORT: FROMGIT:`
-    - Example:
-        - if the commit message in the maintainer tree is
-```
-        important patch from upstream
+AOSP Android Common Kernel 原有的提交说明文档保留在
+[`README.android-common-kernel.md`](README.android-common-kernel.md)（未做改动）。
 
-        This is the detailed description of the important patch
+## 免责声明
 
-        Signed-off-by: Fred Jones <fred.jones@foo.org>
-```
->- then Joe Smith would upload the patch for the common kernel as
-```
-        FROMGIT: important patch from upstream
-
-        This is the detailed description of the important patch
-
-        Signed-off-by: Fred Jones <fred.jones@foo.org>
-
-        Bug: 135791357
-        (cherry picked from commit 878a2fd9de10b03d11d2f622250285c7e63deace
-         https://git.kernel.org/pub/scm/linux/kernel/git/foo/bar.git test-branch)
-        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
-        Signed-off-by: Joe Smith <joe.smith@foo.org>
-```
-
-
-- If the patch has been submitted to LKML, but not accepted into any maintainer tree
-    - tag the patch subject with `FROMLIST:`
-    - add a `Link:` tag with a link to the submittal on lore.kernel.org
-    - add a `Bug:` tag with the Android bug (required for patches not accepted into
-a maintainer tree)
-    - if changes were required, use `BACKPORT: FROMLIST:`
-    - Example:
-```
-        FROMLIST: important patch from upstream
-
-        This is the detailed description of the important patch
-
-        Signed-off-by: Fred Jones <fred.jones@foo.org>
-
-        Bug: 135791357
-        Link: https://lore.kernel.org/lkml/20190619171517.GA17557@someone.com/
-        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
-        Signed-off-by: Joe Smith <joe.smith@foo.org>
-```
-
-## Requirements for Android-specific patches: `ANDROID:`
-
-- If the patch is fixing a bug to Android-specific code
-    - tag the patch subject with `ANDROID:`
-    - add a `Fixes:` tag that cites the patch with the bug
-    - Example:
-```
-        ANDROID: fix android-specific bug in foobar.c
-
-        This is the detailed description of the important fix
-
-        Fixes: 1234abcd2468 ("foobar: add cool feature")
-        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
-        Signed-off-by: Joe Smith <joe.smith@foo.org>
-```
-
-- If the patch is a new feature
-    - tag the patch subject with `ANDROID:`
-    - add a `Bug:` tag with the Android bug (required for android-specific features)
-
+仅供**研究与个人设备实验**。刷写自编内核可能导致设备无法开机、数据丢失或失去保修，**风险自负**。
