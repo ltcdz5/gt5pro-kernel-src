@@ -1,6 +1,6 @@
-# 构建历史补丁序列（opt5 → v1.1-opt42）
+# 构建历史补丁序列（opt5 → v1.1-opt47）
 
-本目录是 **33 个真实构建提交**的原样补丁（git format-patch 导出），每个补丁头部保留
+本目录是 **38 个真实构建提交**的原样补丁（git format-patch 导出），每个补丁头部保留
 **原始提交 SHA / 作者 / 日期 / 提交信息原文**，可与工具台账仓库的 CHANGELOG.md「提交」列逐一核对。
 
 ## 为什么是补丁，而不是 git 提交历史
@@ -59,3 +59,8 @@ ebdd1643cfdb 的 Oplus 同步），把提交直接推上来会被 GitHub 拒绝�
 | 31 | 0031-v1.1-opt40-CVE-2026-31446-ext4-sysfs-UAF.patch | a9d0d61fbf68 | v1.1-opt40: CVE-2026-31446 —— ext4 sysfs UAF（竞态型）+ 首次通过"改结构体"的闸门 |
 | 32 | 0032-v1.1-opt41-AF_PACKET-cmsg-1ee90b77b727-ad9a0374ee6d.patch | e5f8f1aa13a8 | v1.1-opt41: 修 AF_PACKET 时间戳 cmsg 越界读（上游 1ee90b77b727 / 账本 ad9a0374ee6d） |
 | 33 | 0033-v1.1-opt42-USB-gadget-bRequestType-LZ4-armv8-Permtab.patch | 77aa56a8024c | v1.1-opt42: USB gadget bRequestType 位域误判 + LZ4 armv8 Permtable 越界读 |
+| 34 | 0034-v1.1-opt45-T0-C-sched_ext-scx.patch | 83f9166efbd4 | v1.1-opt45 (T0/路线C)：拒绝启用 sched_ext —— 让 scx 干净失败，不再硬挂死整机 |
+| 35 | 0035-v1.1-opt45-2-sched_ext_ops-BPF-struct_ops-BPF.patch | dfea5e50fd23 | v1.1-opt45（探针2）：把 sched_ext_ops 从 BPF struct_ops 类型表里摘掉 —— 在真正挂死的那一层（BPF 加载）拦截 |
+| 36 | 0036-opt45-61-.rej-.orig-LZ4-Zstd-gitlink-Baseband-guard-.patch | 846c9c1ba805 | opt45 交付前清理：删除 61 个 .rej/.orig 残留（LZ4/Zstd 补丁产物）+ 摘下悬空 gitlink Baseband-guard（160000，无 .gitmodules） |
+| 37 | 0037-opt45-Baseband-guard-gitlink.patch | 6d61a69692ef | opt45：把 Baseband-guard 从【悬空 gitlink】修成【合法子模块引用】 |
+| 38 | 0038-v1.1-opt47-i2c-ACK-10-02.patch | 5ddf8408b29a | v1.1-opt47：i2c 适配器注册竞态 + 失败路径补漏（取自 ACK 10-02 两条） |

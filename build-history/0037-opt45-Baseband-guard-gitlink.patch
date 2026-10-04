@@ -1,0 +1,37 @@
+From 6d61a69692efd2bfb825bdb2f5dc23345bb0ea71 Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sun, 4 Oct 2026 17:48:03 +0800
+Subject: [PATCH 4/5] =?UTF-8?q?opt45=EF=BC=9A=E6=8A=8A=20Baseband-guard=20?=
+ =?UTF-8?q?=E4=BB=8E=E3=80=90=E6=82=AC=E7=A9=BA=20gitlink=E3=80=91?=
+ =?UTF-8?q?=E4=BF=AE=E6=88=90=E3=80=90=E5=90=88=E6=B3=95=E5=AD=90=E6=A8=A1?=
+ =?UTF-8?q?=E5=9D=97=E5=BC=95=E7=94=A8=E3=80=91?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- 原来只有 160000 的 gitlink、没有 .gitmodules ⇒ 别人 clone 不到、git status 也不正常
+- 现补 .gitmodules 指向真实上游 vc-teahouse/Baseband-guard（GPL-2.0），提交 a5b57f15d6b5 已核实存在
+- 它是构建真依赖（CONFIG_BBG => security/baseband-guard/），不是残留，所以不能一删了之
+---
+ .gitmodules    | 3 +++
+ Baseband-guard | 1 +
+ 2 files changed, 4 insertions(+)
+ create mode 100644 .gitmodules
+ create mode 160000 Baseband-guard
+
+diff --git a/.gitmodules b/.gitmodules
+new file mode 100644
+index 000000000000..6b2904dbca60
+--- /dev/null
++++ b/.gitmodules
+@@ -0,0 +1,3 @@
++[submodule "Baseband-guard"]
++	path = Baseband-guard
++	url = https://github.com/vc-teahouse/Baseband-guard.git
+diff --git a/Baseband-guard b/Baseband-guard
+new file mode 160000
+index 000000000000..a5b57f15d6b5
+--- /dev/null
++++ b/Baseband-guard
+@@ -0,0 +1 @@
++Subproject commit a5b57f15d6b597a1bd157c42330fe80020b1d628

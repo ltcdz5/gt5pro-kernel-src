@@ -1,0 +1,49 @@
+From dfea5e50fd23deabd7b6c5554727bce566458ccb Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sun, 4 Oct 2026 17:15:50 +0800
+Subject: [PATCH 2/5] =?UTF-8?q?v1.1-opt45=EF=BC=88=E6=8E=A2=E9=92=882?=
+ =?UTF-8?q?=EF=BC=89=EF=BC=9A=E6=8A=8A=20sched=5Fext=5Fops=20=E4=BB=8E=20B?=
+ =?UTF-8?q?PF=20struct=5Fops=20=E7=B1=BB=E5=9E=8B=E8=A1=A8=E9=87=8C?=
+ =?UTF-8?q?=E6=91=98=E6=8E=89=20=E2=80=94=E2=80=94=20=E5=9C=A8=E7=9C=9F?=
+ =?UTF-8?q?=E6=AD=A3=E6=8C=82=E6=AD=BB=E7=9A=84=E9=82=A3=E4=B8=80=E5=B1=82?=
+ =?UTF-8?q?=EF=BC=88BPF=20=E5=8A=A0=E8=BD=BD=EF=BC=89=E6=8B=A6=E6=88=AA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+实测：本机加载任何 sched_ext 的 struct_ops 对象都会在【BPF 加载阶段】硬挂死整机，
+根本到不了 scx_ops_enable()（裸 prog loadall 不注册也挂）。上一版 T0 拦在函数里，打不到点上。
+本版改为在 kernel/bpf/bpf_struct_ops_types.h 里不再注册 sched_ext_ops 类型：
+- 对象加载时直接干净报错，不再冻结设备
+- 导出集合零变化（本树 scx_* 导出=0，bpf_sched_ext_ops 也未导出）=> 厂商 CRC 契约不动
+---
+ kernel/bpf/bpf_struct_ops_types.h | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/bpf/bpf_struct_ops_types.h b/kernel/bpf/bpf_struct_ops_types.h
+index 3618769d853d..f6c934b14bd3 100644
+--- a/kernel/bpf/bpf_struct_ops_types.h
++++ b/kernel/bpf/bpf_struct_ops_types.h
+@@ -9,8 +9,18 @@ BPF_STRUCT_OPS_TYPE(bpf_dummy_ops)
+ #include <net/tcp.h>
+ BPF_STRUCT_OPS_TYPE(tcp_congestion_ops)
+ #endif
+-#ifdef CONFIG_SCHED_CLASS_EXT
+-#include <linux/sched/ext.h>
+-BPF_STRUCT_OPS_TYPE(sched_ext_ops)
+-#endif
++/*
++ * opt45 (probe 2): sched_ext_ops is deliberately NOT registered as a BPF
++ * struct_ops type on this tree.
++ *
++ * Loading ANY struct_ops object of this type hard-hangs the machine, and the
++ * hang happens in the BPF load path -- scx_ops_enable() is never even reached
++ * (verified: bare bpftool prog loadall, i.e. without registration, also hangs).
++ * With the type unregistered such loads fail with a clean -ENOENT/-EINVAL
++ * instead of freezing the device.
++ *
++ * No exported symbol changes: this tree exports 0 scx_* symbols, and
++ * bpf_sched_ext_ops itself is not exported, so the vendor module CRC
++ * contracts are untouched.
++ */
+ #endif

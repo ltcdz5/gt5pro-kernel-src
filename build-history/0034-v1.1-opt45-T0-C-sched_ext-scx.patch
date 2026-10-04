@@ -1,0 +1,61 @@
+From 83f9166efbd4a45a7854a36726533110f1c3ea0e Mon Sep 17 00:00:00 2001
+From: ltcdz5 <ltcdz5@local>
+Date: Sun, 4 Oct 2026 16:37:38 +0800
+Subject: [PATCH 1/5] =?UTF-8?q?v1.1-opt45=20(T0/=E8=B7=AF=E7=BA=BFC)?=
+ =?UTF-8?q?=EF=BC=9A=E6=8B=92=E7=BB=9D=E5=90=AF=E7=94=A8=20sched=5Fext=20?=
+ =?UTF-8?q?=E2=80=94=E2=80=94=20=E8=AE=A9=20scx=20=E5=B9=B2=E5=87=80?=
+ =?UTF-8?q?=E5=A4=B1=E8=B4=A5=EF=BC=8C=E4=B8=8D=E5=86=8D=E7=A1=AC=E6=8C=82?=
+ =?UTF-8?q?=E6=AD=BB=E6=95=B4=E6=9C=BA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+本树 ext.c 是 2022 年 v1 时代的残缺 backport，加载任何 BPF 调度器都会在
+scx_ops_enable() 持 cpus_read_lock() 期间硬挂死（无 pstore，只能看门狗复位）。
+在改动任何状态之前直接返回 -EOPNOTSUPP：
+- 调用方（bpftool / scx_loader / 未来的 Scene）拿到干净错误，机器照常运行
+- 符号与结构体一律不动 => 导出集合零变化 => 厂商模块 CRC 契约不受影响
+- 同时作为路线 A 二分定位的 T0 探针：验证 补丁->构建->双闸门->刷机->register 测试 这条回路
+---
+ kernel/sched/ext.c      | 17 +++++++++++++++++
+ scripts/setlocalversion |  2 +-
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/sched/ext.c b/kernel/sched/ext.c
+index 0ceb322881b8..67758853abfc 100755
+--- a/kernel/sched/ext.c
++++ b/kernel/sched/ext.c
+@@ -2800,6 +2800,23 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
+ 
+ 	mutex_lock(&scx_ops_enable_mutex);
+ 
++	/*
++	 * opt45 (T0 / route C): refuse to enable sched_ext.
++	 *
++	 * This tree carries the 2022-era, incomplete vendor backport of sched_ext.
++	 * Loading any BPF scheduler hard-hangs the whole system inside
++	 * scx_ops_enable() while holding cpus_read_lock() -- no pstore, only a
++	 * watchdog reset brings the device back.
++	 *
++	 * Return before touching any state so callers (bpftool / scx_loader / Scene)
++	 * get a clean -EOPNOTSUPP instead of hanging the machine.  Symbols and
++	 * structs are intentionally left untouched so that the export set (and thus
++	 * the vendor module CRC contracts) does not change at all.
++	 */
++	mutex_unlock(&scx_ops_enable_mutex);
++	pr_info("sched_ext: enable refused (opt45 T0)\n");
++	return -EOPNOTSUPP;
++
+ 	if (!scx_ops_helper) {
+ 		WRITE_ONCE(scx_ops_helper,
+ 			   scx_create_rt_helper("sched_ext_ops_helper"));
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index 1a6400c38dc4..ad139462fb34 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+ res=$(echo "$res" | sed 's/-dirty//g')
+-echo "-android14-11-o-ltcdz5-v1.1-opt42"
++echo "-android14-11-o-ltcdz5-v1.1-opt45"
