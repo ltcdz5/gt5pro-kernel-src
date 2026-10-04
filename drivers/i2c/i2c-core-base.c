@@ -1490,13 +1490,28 @@ static int i2c_register_adapter(struct i2c_adapter *adap)
 		goto out_list;
 	}
 
-	dev_set_name(&adap->dev, "i2c-%d", adap->nr);
+	res = dev_set_name(&adap->dev, "i2c-%d", adap->nr);
+	if (res) {
+		pr_err("adapter '%s': can't set device name (%d)\n", adap->name, res);
+		goto err_remove_irq_domain;
+	}
 	adap->dev.bus = &i2c_bus_type;
 	adap->dev.type = &i2c_adapter_type;
+
+	/*
+	 * opt47：公布适配器指针。id 在 i2c_add_adapter()/__i2c_add_numbered_adapter() 里
+	 * 先用 NULL 占位保留，到这里——适配器已完全初始化——才把真实指针写进 idr，避免别的线程
+	 * 在注册中途用 i2c_get_adapter() 拿到半成品适配器。
+	 * 对应 ACK 1febb174815b（i2c: core: fix adapter registration race）。
+	 */
+	mutex_lock(&core_lock);
+	idr_replace(&i2c_adapter_idr, adap, adap->nr);
+	mutex_unlock(&core_lock);
+
 	res = device_register(&adap->dev);
 	if (res) {
 		pr_err("adapter '%s': can't register device (%d)\n", adap->name, res);
-		goto out_list;
+		goto err_remove_irq_domain;
 	}
 
 	res = i2c_setup_smbus_alert(adap);
@@ -1541,6 +1556,10 @@ out_reg:
 	init_completion(&adap->dev_released);
 	device_unregister(&adap->dev);
 	wait_for_completion(&adap->dev_released);
+err_remove_irq_domain:
+	/* opt47: 失败路径补拆 Host Notify IRQ domain（取自 ACK e984010cda7d 的附带收益；
+	 * 未取它的 debugfs 结构体改动，因为那会给 struct i2c_adapter 加成员而影响导出符号 CRC）*/
+	i2c_host_notify_irq_teardown(adap);
 out_list:
 	mutex_lock(&core_lock);
 	idr_remove(&i2c_adapter_idr, adap->nr);
@@ -1560,7 +1579,7 @@ static int __i2c_add_numbered_adapter(struct i2c_adapter *adap)
 	int id;
 
 	mutex_lock(&core_lock);
-	id = idr_alloc(&i2c_adapter_idr, adap, adap->nr, adap->nr + 1, GFP_KERNEL);
+	id = idr_alloc(&i2c_adapter_idr, NULL, adap->nr, adap->nr + 1, GFP_KERNEL);
 	mutex_unlock(&core_lock);
 	if (WARN(id < 0, "couldn't get idr"))
 		return id == -ENOSPC ? -EBUSY : id;
@@ -1596,7 +1615,7 @@ int i2c_add_adapter(struct i2c_adapter *adapter)
 	}
 
 	mutex_lock(&core_lock);
-	id = idr_alloc(&i2c_adapter_idr, adapter,
+	id = idr_alloc(&i2c_adapter_idr, NULL,
 		       __i2c_first_dynamic_bus_num, 0, GFP_KERNEL);
 	mutex_unlock(&core_lock);
 	if (WARN(id < 0, "couldn't get idr"))

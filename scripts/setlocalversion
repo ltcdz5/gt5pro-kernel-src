@@ -179,4 +179,4 @@ res=$(echo "$res" | sed 's/-dirty//g')
 res=$(echo "$res" | sed 's/-dirty//g')
 res=$(echo "$res" | sed 's/-dirty//g')
 res=$(echo "$res" | sed 's/-dirty//g')
-echo "-android14-11-o-ltcdz5-v1.1-opt42"
+echo "-android14-11-o-ltcdz5-v1.1-opt47"

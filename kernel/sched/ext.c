@@ -2800,6 +2800,23 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 
 	mutex_lock(&scx_ops_enable_mutex);
 
+	/*
+	 * opt45 (T0 / route C): refuse to enable sched_ext.
+	 *
+	 * This tree carries the 2022-era, incomplete vendor backport of sched_ext.
+	 * Loading any BPF scheduler hard-hangs the whole system inside
+	 * scx_ops_enable() while holding cpus_read_lock() -- no pstore, only a
+	 * watchdog reset brings the device back.
+	 *
+	 * Return before touching any state so callers (bpftool / scx_loader / Scene)
+	 * get a clean -EOPNOTSUPP instead of hanging the machine.  Symbols and
+	 * structs are intentionally left untouched so that the export set (and thus
+	 * the vendor module CRC contracts) does not change at all.
+	 */
+	mutex_unlock(&scx_ops_enable_mutex);
+	pr_info("sched_ext: enable refused (opt45 T0)\n");
+	return -EOPNOTSUPP;
+
 	if (!scx_ops_helper) {
 		WRITE_ONCE(scx_ops_helper,
 			   scx_create_rt_helper("sched_ext_ops_helper"));
