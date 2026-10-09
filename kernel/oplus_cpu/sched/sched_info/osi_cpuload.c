@@ -868,4 +868,4 @@ void jank_cpuload_init(void)
 				kcs->cpustat[CPUTIME_GUEST_NICE];
 	}
 }
-
+EXPORT_SYMBOL_GPL(walt_rq);

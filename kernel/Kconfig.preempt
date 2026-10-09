@@ -136,6 +136,39 @@ config SCHED_CORE
 config SLIM_SCHED
 	bool "slim sched"
 	default n
+
+config HMBIRD_SCHED
+	bool "OPPO hmbird sched (/proc/hmbird_sched hub built into the kernel)"
+	depends on SCHED_CLASS_EXT
+	default n
+	help
+	  Build the two OPPO "hmbird / slim sched" helper units that the
+	  factory kernel keeps next to ext.c, as part of kernel/sched/
+	  build_policy.c:
+
+	    kernel/sched/slim_sysctl.c          (slim.h, /proc/slim_sched)
+	    kernel/sched/hmbird_sched_proc_main.c
+
+	  This creates /proc/hmbird_sched from the kernel image itself and
+	  publishes the hmbird_dir global that the vendor module
+	  oplus_bsp_sched_ext.ko imports to hang its own entries under.
+
+	  The two halves are disjoint, and that is a hard requirement:
+	  hmbird_sched_proc_main.c is trimmed to the factory-kernel half
+	  (scx_enable, partial_ctrl, cpuctrl_*, slim_stats, hmbirdcore_debug,
+	  slim_for_app, misfit_ds, save_gov, heartbeat*, watchdog_enable,
+	  isolate_ctrl, parctrl_*, isoctrl_*, iso_free_rescue, hmbird_stats),
+	  while the module owns slim_walt/, slim_freq_gov/,
+	  scx_shadow_tick_enable, highres_tick_ctrl_dbg, cpu7_tl and
+	  frame_per_sec.  proc_create() returns NULL when the name already
+	  exists, and the module's HMBIRD_CREATE_PROC_ENTRY* macros turn that
+	  into "return -ENOMEM", i.e. a failed module init.  Registering a
+	  name twice is therefore fatal, and this split is verified against
+	  the factory Image.stock string set.
+
+	  If unsure, say Y only if hmbird_sched_proc_main.c still matches the
+	  factory-kernel half; otherwise say N.
+
 config SCHED_CLASS_EXT
 	bool "Extensible Scheduling Class"
 	depends on BPF_SYSCALL && BPF_JIT

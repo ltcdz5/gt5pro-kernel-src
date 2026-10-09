@@ -56,4 +56,20 @@
 
 #ifdef CONFIG_SCHED_CLASS_EXT
 # include "ext.c"
+
+# ifdef CONFIG_HMBIRD_SCHED
+/*
+ * OPPO hmbird / slim sched helpers.  They are #include'd into this
+ * compilation unit (and not built as separate objects) on purpose:
+ *
+ *   - slim_sysctl.c has no #include's of its own; it relies on the headers
+ *     already pulled in here (and on slim.h).
+ *   - hmbird_sched_proc_main.c prints ext.c's file-static scx_exit_type /
+ *     scx_nr_rejected, which are only visible inside this unit.
+ *
+ * Same layout as the factory kernel's build_policy.c.
+ */
+#  include "slim_sysctl.c"
+#  include "hmbird_sched_proc_main.c"
+# endif
 #endif

@@ -510,6 +510,17 @@ struct scx_dispatch_q {
 	u64			id;
 	struct llist_node	free_node;
 	struct rcu_head		rcu;
+	/*
+	 * BLOCK2 alignment to the factory ABI: stock.btf has scx_dispatch_q at
+	 * 96 bytes with last_consume_at @80 (8 B) and is_timeout @88 (1 B);
+	 * ours stopped at 80 bytes.  Both are consumed by the vendor global-DSQ
+	 * machine (gdsqs[i].last_consume_at / gdsqs[i].is_timeout in the factory
+	 * ext.c), so block 2 consume_hmbird_global_dsq() cannot be landed
+	 * without them.  genksyms emits only the struct tag, so this layout
+	 * change moves no CRC.
+	 */
+	u64			last_consume_at;
+	bool			is_timeout;
 };
 
 /* scx_entity.flags */
@@ -634,7 +645,12 @@ struct sched_ext_entity {
 	/* cold fields */
 	struct list_head	tasks_node;
 	struct task_struct	*task;
+	unsigned long		sched_prop;
+	unsigned long		top_task_prop;
 	struct scx_sched_task_stats sts;
+	unsigned long		running_at;
+	int			gdsq_idx;
+	int			dsq_sync_ux;
 };
 
 void sched_ext_free(struct task_struct *p);

@@ -7,6 +7,16 @@
  * Copyright (c) 2022 David Vernet <dvernet@meta.com>
  */
 
+/*
+ * BLOCK1 (step 5b): the factory (OPPO/GKI) kernel/sched/ext.h carries an
+ * include guard; the upstream file this tree started from does not.  build_policy.c
+ * #includes ext.c and then (under CONFIG_HMBIRD_SCHED) slim_sysctl.c /
+ * hmbird_sched_proc_main.c, and ext.h is reachable more than once through that
+ * unit -- without a guard that is 20 "redefinition of scx_wake_flags" errors.
+ */
+#ifndef __SCX_EXT_H
+#define __SCX_EXT_H
+
 
 /*
  * Tag marking a kernel function as a kfunc. This is meant to minimize the
@@ -15,6 +25,66 @@
  * kfunc, or a global kfunc in an LTO build.
  */
 #define __bpf_kfunc __used noinline
+
+/*
+ * BLOCK1 (step 5b): OPPO/GKI debug + systrace helpers, taken from the ferstar
+ * scx branch (kernel/sched/ext.h).  hmbirdcore_debug is owned by
+ * kernel/sched/hmbird_sched_proc_main.c and also declared in slim.h; ext.c is
+ * included before slim.h in build_policy.c, so it is declared here too.
+ */
+#define DEBUG_INTERNAL		(1 << 0)
+#define DEBUG_INFO_TRACE	(1 << 1)
+#define DEBUG_INFO_SYSTRACE	(1 << 2)
+
+extern int hmbirdcore_debug;
+extern noinline int tracing_mark_write(const char *buf);
+
+/*
+ * NOTE: the factory spelling of this macro is
+ *     (unlikely(hmbirdcore_debug & DEBUG_INFO_TRACE | DEBUG_INFO_SYSTRACE))
+ * which, because & binds tighter than |, is constant-true.  Parenthesised
+ * correctly here; behaviour difference is confined to the debug-only
+ * android_vh_get_util() sampling in set_next_task_scx().
+ */
+#define debug_enabled()	\
+	(unlikely(hmbirdcore_debug & (DEBUG_INFO_TRACE | DEBUG_INFO_SYSTRACE)))
+
+#define scx_debug(fmt, ...) \
+	pr_info("<hmbird_sched><ext>:" fmt, ##__VA_ARGS__);
+
+#define scx_err(fmt, ...) \
+	pr_err("<hmbird_sched><ext>:" fmt, ##__VA_ARGS__);
+
+#define scx_info_trace(fmt, ...)			\
+do {						\
+	if (unlikely(hmbirdcore_debug & DEBUG_INFO_TRACE))		\
+		trace_printk("<hmbird_sched><ext>:" fmt, ##__VA_ARGS__); \
+} while (0)
+
+#define scx_info_systrace(fmt, ...)	\
+do {					\
+	if (unlikely(hmbirdcore_debug & DEBUG_INFO_SYSTRACE)) {	\
+		char buf[256];		\
+		snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__);	\
+		tracing_mark_write(buf);			\
+	}				\
+} while (0)
+
+#define scx_internal_trace(fmt, ...)			\
+do {						\
+	if (unlikely(hmbirdcore_debug & DEBUG_INTERNAL))		\
+		trace_printk("<hmbird_sched><ext>:" fmt, ##__VA_ARGS__); \
+} while (0)
+
+#define scx_internal_systrace(fmt, ...)	\
+do {					\
+	if (unlikely(hmbirdcore_debug & DEBUG_INTERNAL)) {	\
+		char buf[256];		\
+		snprintf(buf, sizeof(buf), fmt, ##__VA_ARGS__);	\
+		tracing_mark_write(buf);			\
+	}				\
+} while (0)
+
 
 enum scx_wake_flags {
 	/* expose select WF_* flags as enums */
@@ -109,9 +179,9 @@ extern const struct file_operations sched_ext_fops;
 extern unsigned long scx_watchdog_timeout;
 extern unsigned long scx_watchdog_timestamp;
 
-DECLARE_STATIC_KEY_FALSE(__scx_ops_enabled);
+extern atomic_t __scx_ops_enabled;
 DECLARE_STATIC_KEY_FALSE(__scx_switched_all);
-#define scx_enabled()		static_branch_unlikely(&__scx_ops_enabled)
+#define scx_enabled()		atomic_read(&__scx_ops_enabled)
 #define scx_switched_all()	static_branch_unlikely(&__scx_switched_all)
 
 DECLARE_STATIC_KEY_FALSE(scx_ops_cpu_preempt);
@@ -255,3 +325,5 @@ static inline void scx_cgroup_cancel_attach(struct cgroup_taskset *tset) {}
 static inline void scx_group_set_weight(struct task_group *tg, unsigned long cgrp_weight) {}
 #endif	/* CONFIG_EXT_GROUP_SCHED */
 #endif	/* CONFIG_CGROUP_SCHED */
+
+#endif /* __SCX_EXT_H */

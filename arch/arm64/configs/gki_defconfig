@@ -9,6 +9,7 @@ CONFIG_BPF_JIT_ALWAYS_ON=y
 CONFIG_PREEMPT=y
 CONFIG_SLIM_SCHED=y
 CONFIG_SCHED_CLASS_EXT=y
+CONFIG_HMBIRD_SCHED=y
 CONFIG_IRQ_TIME_ACCOUNTING=y
 CONFIG_TASKSTATS=y
 CONFIG_TASK_XACCT=y
@@ -787,7 +788,7 @@ CONFIG_DEFAULT_BBR=y
 # [opt2b] 默认队列 = fq(必须先开总开关 NET_SCH_DEFAULT, 否则 DEFAULT_FQ 被静默丢弃)
 CONFIG_NET_SCH_DEFAULT=y
 CONFIG_DEFAULT_FQ=y
-# [opt3] WiFi 法规库内嵌(修掉开机 69 秒的 regulatory.db 固件等待)
+# [opt3] WiFi 法规库内嵌(regulatory.db + regulatory.db.p7s)
 CONFIG_EXTRA_FIRMWARE="regulatory.db regulatory.db.p7s"
 CONFIG_EXTRA_FIRMWARE_DIR="firmware"
 # CONFIG_KSU is not set
@@ -828,8 +829,9 @@ CONFIG_CRYPTO_SM4=y
 CONFIG_CRYPTO_SM4_ARM64_CE=y
 CONFIG_CRYPTO_SM4_ARM64_CE_BLK=y
 CONFIG_EROFS_FS_ZIP_LZMA=y
-CONFIG_HZ=300
-CONFIG_HZ_300=y
+CONFIG_HZ=250
+# CONFIG_HZ_300 is not set
+CONFIG_HZ_250=y
 CONFIG_KFENCE_SAMPLE_INTERVAL=0
 CONFIG_LTO_CLANG=y
 CONFIG_LTO_CLANG_THIN=y
@@ -840,7 +842,6 @@ CONFIG_RCU_NOCB_CPU_CB_BOOST=y
 CONFIG_SECTION_MISMATCH_WARN_ONLY=y
 CONFIG_SECURITY_LANDLOCK=y
 CONFIG_SECURITY_PATH=y
-CONFIG_SLAB_MERGE_DEFAULT=y
 CONFIG_XZ_DEC_MICROLZMA=y
 # CONFIG_ZRAM_MEMORY_TRACKING is not set
 CONFIG_MQ_IOSCHED_SSG=y
@@ -851,3 +852,25 @@ CONFIG_MQ_IOSCHED_SSG_CGROUP=y
 # CONFIG_INIT_STACK_ALL_ZERO is not set
 CONFIG_INIT_STACK_NONE=y
 # CONFIG_LTO_NONE is not set
+# ---- [opt49] 社区常见、我们缺的实用项（无新增导出符号、不动调度/显示）----
+# 强引用/符号检查仍按原有规则；FORCE_LOAD 只在手动 insmod -f 时生效
+CONFIG_MODULE_FORCE_LOAD=y
+# NTFS 读写（U 盘/移动硬盘）
+CONFIG_NTFS3_FS=y
+CONFIG_NTFS3_LZX_XPRESS=y
+# squashfs 只读镜像（部分模块/镜像方案）
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
+# 内存页去重（省内存）
+CONFIG_KSM=y
+# SMB/CIFS 网络共享
+CONFIG_CIFS=y
+
+# ---- [opt49] 关掉厂商源码已损坏的 L2TP（源树里 l2tp_session_inc_refcount 无定义，
+#      modpost 报 undefined；运行时由厂商预编译 l2tp_core.ko/l2tp_ppp.ko 提供）----
+# CONFIG_L2TP is not set
+# CONFIG_PPPOL2TP is not set
+
+# ---- [opt49 修正] 闸门2 实测：下面两项会改核心结构布局 ⇒ 全量模块 modversions CRC 失效 ✗ 撤掉 ----
+# CONFIG_MODULE_FORCE_LOAD is not set   # 改 struct module ⇒ module_layout CRC 变（实测 621 模块全拒）
+# CONFIG_KSM is not set                 # 改 struct mm_struct（KSM 成员）⇒ 取 mm* 的符号 CRC 变

@@ -1,74 +1,150 @@
-<!-- badges -->
-[![Device](https://img.shields.io/badge/Device-Realme%20GT5%20Pro%20(RMX3888)-orange.svg)]()
-[![SoC](https://img.shields.io/badge/SoC-Snapdragon%208%20Gen%203%20(SM8650)-0a7bbb.svg)]()
-[![Kernel](https://img.shields.io/badge/Kernel-6.1.141%20OKI-f6a500.svg)]()
-[![License](https://img.shields.io/badge/License-GPL--2.0-blue.svg)](LICENSE)
-[![AK3](https://img.shields.io/badge/AnyKernel3-Ready-3ddc84.svg)]()
+# How do I submit patches to Android Common Kernels
 
-# GT5 Pro 自编内核（RMX3888 / SM8650 / 6.1.141 OKI）
+1. BEST: Make all of your changes to upstream Linux. If appropriate, backport to the stable releases.
+   These patches will be merged automatically in the corresponding common kernels. If the patch is already
+   in upstream Linux, post a backport of the patch that conforms to the patch requirements below.
+   - Do not send patches upstream that contain only symbol exports. To be considered for upstream Linux,
+additions of `EXPORT_SYMBOL_GPL()` require an in-tree modular driver that uses the symbol -- so include
+the new driver or changes to an existing driver in the same patchset as the export.
+   - When sending patches upstream, the commit message must contain a clear case for why the patch
+is needed and beneficial to the community. Enabling out-of-tree drivers or functionality is not
+not a persuasive case.
 
-> 真我 GT5 Pro（pineapple / RMX3888，Snapdragon 8 Gen 3）的自编内核**源码快照**仓库。
-> 基于 OPPO 官方开源 **6.1.141 OKI** 树 + **ACK（android14-6.1）回移与修复**，实机日常使用。
+2. LESS GOOD: Develop your patches out-of-tree (from an upstream Linux point-of-view). Unless these are
+   fixing an Android-specific bug, these are very unlikely to be accepted unless they have been
+   coordinated with kernel-team@android.com. If you want to proceed, post a patch that conforms to the
+   patch requirements below.
 
-## 现役版本
+# Common Kernel patch requirements
 
-| 项 | 值 |
-|---|---|
-| 版本串 | `6.1.141-android14-11-o-ltcdz5-v1.1-opt49` |
-| 现役镜像 | `boot-v1.1-opt49-crc-repacked.img`（md5 `c40ee988904f2ea29720b0100b0ad124`）|
-| **AK3 包** | `GT5Pro-RMX3888-v1.1-opt49-crc-AK3.zip`（md5 `13966f4df5e14c6289b4aff60b4380d9`，**含附加模块自动安装**）|
-| 源码快照 | 分支 `opt48`（opt49 的快照待观察期结束后推）|
-| 回退首选 | `boot-v1.1-opt49-repacked.img` / `boot-v1.1-opt48-repacked.img` |
-| 台账（权威） | 工具仓库 [gt5pro-kernel-kit](https://github.com/ltcdz5/gt5pro-kernel-kit) 的 `CHANGELOG.md` |
+- All patches must conform to the Linux kernel coding standards and pass `scripts/checkpatch.pl`
+- Patches shall not break gki_defconfig or allmodconfig builds for arm, arm64, x86, x86_64 architectures
+(see  https://source.android.com/setup/build/building-kernels)
+- If the patch is not merged from an upstream branch, the subject must be tagged with the type of patch:
+`UPSTREAM:`, `BACKPORT:`, `FROMGIT:`, `FROMLIST:`, or `ANDROID:`.
+- All patches must have a `Change-Id:` tag (see https://gerrit-review.googlesource.com/Documentation/user-changeid.html)
+- If an Android bug has been assigned, there must be a `Bug:` tag.
+- All patches must have a `Signed-off-by:` tag by the author and the submitter
 
-## 特性
+Additional requirements are listed below based on patch type
 
-- 🔧 **ACK 回移**：android14-6.1 LTS 安全修复（f2fs 死锁、i2c 适配器注册竞态、rpmsg char UAF、arm64 fault、pKVM pvmfw …）
-- 🗜️ **存储**：f2fs 修复 + 合并 IPU 写提交补漏；zstd / lz4
-- 🌐 **网络**：BBR / BRUTAL / VEGAS 等拥塞控制、fq / fq_codel / cake、WireGuard、TPROXY、DNS 解析器
-- 🧠 **内存**：MGLRU（多代 LRU）+ PSI + zram/hybridswap 兼容
-- 🎛️ **调度**：`sched_ext` 已编入、WALT/uag 原厂调度保留（**不做** BORE/BMQ 替换）
-- 📦 **文件系统扩展（opt49）**：NTFS3、SQUASHFS、CIFS（内置）
-- 🔊 **蓝牙修复（opt49-crc）**：定点对齐 `sk_filter_trim_cap` 的 modversions CRC，厂商 `bluetooth.ko` 全栈恢复
-- ⛔ **不做**：内置 Root（KernelSU/SUSFS）、超频、调度替换
+## Requirements for backports from mainline Linux: `UPSTREAM:`, `BACKPORT:`
 
-## 刷写
-
-### 方式 A · AnyKernel3（推荐）
-下载 `GT5Pro-RMX3888-v1.1-opt49-crc-AK3.zip`，在 **KernelSU / Magisk 管理器**里直接刷：
-- 自动把 `Image` 写进 boot 分区（保留 ramdisk / root）
-- **自动安装附加模块**：`horae_once`（相机对焦用的 horae 常驻）、`quiet_logs`（压制原厂 HAL 日志刷屏）
-
-### 方式 B · fastboot（只刷 boot_a）
-```sh
-fastboot flash boot_a boot-v1.1-opt49-crc-repacked.img
-fastboot set_active a        # 必须：fastboot flash 会切到 b 槽
-fastboot reboot
+- If the patch is a cherry-pick from Linux mainline with no changes at all
+    - tag the patch subject with `UPSTREAM:`.
+    - add upstream commit information with a `(cherry picked from commit ...)` line
+    - Example:
+        - if the upstream commit message is
 ```
-⚠️ 只刷 `boot_a`；刷完确认 `getprop ro.boot.slot_suffix` = `_a`。
+        important patch from upstream
 
-## 构建
+        This is the detailed description of the important patch
 
-```sh
-make -j$(nproc) LLVM=1 ARCH=arm64 \
-  CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabihf- \
-  CC="ccache clang" LD=ld.lld HOSTCC=clang HOSTLD=ld.lld O=out \
-  KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig all
+        Signed-off-by: Fred Jones <fred.jones@foo.org>
 ```
-> 构建后必须跑一次 `tools/patch_crc_sk_filter_trim_cap.py`（工具仓库内），否则厂商蓝牙模块会因 CRC 不符被拒载。
+>- then Joe Smith would upload the patch for the common kernel as
+```
+        UPSTREAM: important patch from upstream
 
-## 分支
+        This is the detailed description of the important patch
 
-| 分支 | 内容 |
-|---|---|
-| `main` | 说明与当前指向 |
-| `opt48` | v1.1-opt48 源码快照（现役源码基线）|
-| `opt47` / `opt42` | 历史快照 |
+        Signed-off-by: Fred Jones <fred.jones@foo.org>
 
-## 归属与免责
+        Bug: 135791357
+        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
+        (cherry picked from commit c31e73121f4c1ec41143423ac6ce3ce6dafdcec1)
+        Signed-off-by: Joe Smith <joe.smith@foo.org>
+```
 
-- 许可 **GPL-2.0**；内核版权归各自作者（kernel.org、Qualcomm、OPPO/realme 开源）
-- AnyKernel3 模板：**osm0sis** @ xda-developers；社区参考：**cctv18**/oppo_oplus_realme_sm8650、OnePlusOSS、LineageOS
-- 刷机有风险，**责任自负**；本项目为个人自用与学习。
+- If the patch requires any changes from the upstream version, tag the patch with `BACKPORT:`
+instead of `UPSTREAM:`.
+    - use the same tags as `UPSTREAM:`
+    - add comments about the changes under the `(cherry picked from commit ...)` line
+    - Example:
+```
+        BACKPORT: important patch from upstream
 
-*最近更新：2026-10-08*
+        This is the detailed description of the important patch
+
+        Signed-off-by: Fred Jones <fred.jones@foo.org>
+
+        Bug: 135791357
+        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
+        (cherry picked from commit c31e73121f4c1ec41143423ac6ce3ce6dafdcec1)
+        [joe: Resolved minor conflict in drivers/foo/bar.c ]
+        Signed-off-by: Joe Smith <joe.smith@foo.org>
+```
+
+## Requirements for other backports: `FROMGIT:`, `FROMLIST:`,
+
+- If the patch has been merged into an upstream maintainer tree, but has not yet
+been merged into Linux mainline
+    - tag the patch subject with `FROMGIT:`
+    - add info on where the patch came from as `(cherry picked from commit <sha1> <repo> <branch>)`. This
+must be a stable maintainer branch (not rebased, so don't use `linux-next` for example).
+    - if changes were required, use `BACKPORT: FROMGIT:`
+    - Example:
+        - if the commit message in the maintainer tree is
+```
+        important patch from upstream
+
+        This is the detailed description of the important patch
+
+        Signed-off-by: Fred Jones <fred.jones@foo.org>
+```
+>- then Joe Smith would upload the patch for the common kernel as
+```
+        FROMGIT: important patch from upstream
+
+        This is the detailed description of the important patch
+
+        Signed-off-by: Fred Jones <fred.jones@foo.org>
+
+        Bug: 135791357
+        (cherry picked from commit 878a2fd9de10b03d11d2f622250285c7e63deace
+         https://git.kernel.org/pub/scm/linux/kernel/git/foo/bar.git test-branch)
+        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
+        Signed-off-by: Joe Smith <joe.smith@foo.org>
+```
+
+
+- If the patch has been submitted to LKML, but not accepted into any maintainer tree
+    - tag the patch subject with `FROMLIST:`
+    - add a `Link:` tag with a link to the submittal on lore.kernel.org
+    - add a `Bug:` tag with the Android bug (required for patches not accepted into
+a maintainer tree)
+    - if changes were required, use `BACKPORT: FROMLIST:`
+    - Example:
+```
+        FROMLIST: important patch from upstream
+
+        This is the detailed description of the important patch
+
+        Signed-off-by: Fred Jones <fred.jones@foo.org>
+
+        Bug: 135791357
+        Link: https://lore.kernel.org/lkml/20190619171517.GA17557@someone.com/
+        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
+        Signed-off-by: Joe Smith <joe.smith@foo.org>
+```
+
+## Requirements for Android-specific patches: `ANDROID:`
+
+- If the patch is fixing a bug to Android-specific code
+    - tag the patch subject with `ANDROID:`
+    - add a `Fixes:` tag that cites the patch with the bug
+    - Example:
+```
+        ANDROID: fix android-specific bug in foobar.c
+
+        This is the detailed description of the important fix
+
+        Fixes: 1234abcd2468 ("foobar: add cool feature")
+        Change-Id: I4caaaa566ea080fa148c5e768bb1a0b6f7201c01
+        Signed-off-by: Joe Smith <joe.smith@foo.org>
+```
+
+- If the patch is a new feature
+    - tag the patch subject with `ANDROID:`
+    - add a `Bug:` tag with the Android bug (required for android-specific features)
+

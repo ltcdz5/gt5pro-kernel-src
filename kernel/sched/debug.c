@@ -959,7 +959,7 @@ void proc_sched_show_task(struct task_struct *p, struct pid_namespace *ns,
 		"---------------------------------------------------------"
 		"----------\n");
 #ifdef CONFIG_SLIM_SCHED
-	SEQ_printf(m, "p->sched_prop:0x%lx\n", p->sched_prop);
+	SEQ_printf(m, "p->sched_prop:0x%lx\n", (p->scx ? p->scx->sched_prop : 0UL));
 #endif
 
 #define P_SCHEDSTAT(F)  __PS(#F, schedstat_val(p->stats.F))

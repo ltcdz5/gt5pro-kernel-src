@@ -1555,12 +1555,11 @@ struct task_struct {
 #endif
 	ANDROID_KABI_USE(1, unsigned int saved_state);
 #ifdef CONFIG_SLIM_SCHED
-	ANDROID_KABI_USE(2, unsigned long sched_prop);
-	ANDROID_KABI_USE(3, struct sched_ext_entity *scx);
+	ANDROID_KABI_USE(2, struct sched_ext_entity *scx);
 #else
 	ANDROID_KABI_RESERVE(2);
-	ANDROID_KABI_RESERVE(3);
 #endif
+	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
 	ANDROID_KABI_RESERVE(6);
@@ -1952,14 +1951,14 @@ static inline int task_nice(const struct task_struct *p)
 #define SCHED_PROP_DEADLINE_LEVEL9 (9)  /* 128ms */
 static inline long sched_prop_get_deadline_dsq_id(struct task_struct *p)
 {
-	return (p->sched_prop & SCHED_PROP_DEADLINE_MASK) - 1;
+	return (p->scx->sched_prop & SCHED_PROP_DEADLINE_MASK) - 1;
 }
 
 #define SCHED_PROP_TOP_THREAD_SHIFT (8)
 #define SCHED_PROP_TOP_THREAD_MASK  (0xf << SCHED_PROP_TOP_THREAD_SHIFT)
 static inline int sched_prop_get_top_thread_id(struct task_struct *p)
 {
-	return (p->sched_prop & SCHED_PROP_TOP_THREAD_MASK) >> SCHED_PROP_TOP_THREAD_SHIFT;
+	return (p->scx->sched_prop & SCHED_PROP_TOP_THREAD_MASK) >> SCHED_PROP_TOP_THREAD_SHIFT;
 }
 
 #endif

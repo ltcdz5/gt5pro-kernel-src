@@ -780,7 +780,7 @@ out:
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION_FIXED_OUTPUT
 	if (!strcmp(a->attr.name, "compress_log_size")) {
-		if (t < MIN_COMPRESS_LOG_SIZE || t > MAX_COMPRESS_LOG_SIZE)
+		if (t < MIN_COMPRESS_LOG_SIZE || t > MAX_SUPPORTED_COMPRESS_LOG_SIZE)
 			return -EINVAL;
 		f2fs_down_write(&sbi->sb_lock);
 		F2FS_OPTION(sbi).compress_log_size = (unsigned char)t;

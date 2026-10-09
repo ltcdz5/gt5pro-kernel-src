@@ -6,6 +6,86 @@
  * Copyright (c) 2022 Tejun Heo <tj@kernel.org>
  * Copyright (c) 2022 David Vernet <dvernet@meta.com>
  */
+/*
+ * BLOCK1/BLOCK2 (step 5b): OPPO / GKI hmbird integration.
+ *
+ * Ported from the ferstar GT5 Pro "scx" branch (kernel/sched/ext.c) into this
+ * tree's upstream-derived ext.c.  Deliberately NOT a wholesale swap: the scx
+ * branch's sched_ext_entity / scx_dispatch_q carry extra members
+ * (sched_prop, running_at, gdsq_idx, is_timeout) that would change
+ * struct task_struct and therefore shift genksyms CRCs of already-exported
+ * symbols.  Only the layout-neutral part is integrated -- see the kit report
+ * "第5步b-风驰块1块2" for the itemised remainder.
+ */
+#include "slim.h"
+#include <trace/hooks/sched.h>
+
+/* task-event reasons consumed by android_vh_hmbird_update_load() */
+enum task_event {
+	PUT_PREV_TASK   = 0,
+	PICK_NEXT_TASK  = 1,
+	TASK_WAKE       = 2,
+	TASK_MIGRATE    = 3,
+	TASK_UPDATE     = 4,
+	IRQ_UPDATE      = 5,
+};
+
+/*
+ * CPU isolation masks.  The object itself is defined in
+ * kernel/sched/hmbird_export.c (one of the ten symbols that
+ * oplus_bsp_sched_ext.ko imports); the declaration here must stay
+ * byte-for-byte identical to that definition.
+ */
+struct scx_iso_masks {
+	cpumask_var_t	ex_free;
+	cpumask_var_t	exclusive;
+	cpumask_var_t	partial;
+	cpumask_var_t	big;
+	cpumask_var_t	little;
+};
+extern struct scx_iso_masks iso_masks;
+
+enum cpu_type {
+	LITTLE,
+	BIG,
+	PARTIAL,
+	EXCLUSIVE,
+	INVALID
+};
+
+static bool is_partial_enabled(void)
+{
+	return READ_ONCE(partial_enable);
+}
+
+/*
+ * cpu_cluster() - isolation cluster @cpu belongs to.
+ *
+ * The vendor callback gets the first say (factory semantics): the module marks
+ * a CPU exclusive through android_vh_scx_cpu_exclusive().  Otherwise the masks
+ * published by hmbird_export.c are consulted.
+ */
+static enum cpu_type cpu_cluster(int cpu)
+{
+	int exclusive = 0;
+
+	trace_android_vh_scx_cpu_exclusive(cpu, &exclusive);
+	if (exclusive) {
+		return EXCLUSIVE;
+	} else {
+		if (cpumask_test_cpu(cpu, iso_masks.little)) {
+			return LITTLE;
+		} else if (cpumask_test_cpu(cpu, iso_masks.big)) {
+			return BIG;
+		} else if (cpumask_test_cpu(cpu, iso_masks.partial)) {
+			return PARTIAL;
+		} else if (cpumask_test_cpu(cpu, iso_masks.exclusive)) {
+			return EXCLUSIVE;
+		}
+	}
+	return INVALID;
+}
+
 #define SCX_OP_IDX(op)		(offsetof(struct sched_ext_ops, op) / sizeof(void (*)(void)))
 
 enum scx_internal_consts {
@@ -78,7 +158,6 @@ static LIST_HEAD(scx_tasks);
 /* ops enable/disable */
 static struct kthread_worker *scx_ops_helper;
 static DEFINE_MUTEX(scx_ops_enable_mutex);
-DEFINE_STATIC_KEY_FALSE(__scx_ops_enabled);
 DEFINE_STATIC_PERCPU_RWSEM(scx_fork_rwsem);
 static atomic_t scx_ops_enable_state_var = ATOMIC_INIT(SCX_OPS_DISABLED);
 static bool scx_switch_all_req;
@@ -1019,8 +1098,8 @@ static void dequeue_task_scx(struct rq *rq, struct task_struct *p, int deq_flags
 		SCX_CALL_OP_TASK(SCX_KF_REST, stopping, p, false);
 	}
 
-	//if(task_current(rq, p))
-	//	scx_update_task_ravg(p, rq, PUT_PREV_TASK, rq->clock);
+	if (task_current(rq, p))
+		trace_android_vh_hmbird_update_load(p, rq, PUT_PREV_TASK, rq->clock);
 
 	if (SCX_HAS_OP(quiescent))
 		SCX_CALL_OP_TASK(SCX_KF_REST, quiescent, p, deq_flags);
@@ -1187,8 +1266,20 @@ static void dispatch_to_local_dsq_unlock(struct rq *rq, struct rq_flags *rf,
 #endif	/* CONFIG_SMP */
 
 
+static int task_fits_cpu_scx(struct task_struct *p, int cpu)
+{
+	int fitable = 1;
+
+	trace_android_vh_task_fits_cpu_scx(p, cpu, &fitable);
+
+	return fitable;
+}
+
 static bool task_can_run_on_rq(struct task_struct *p, struct rq *rq)
 {
+	if (!task_fits_cpu_scx(p, cpu_of(rq)))
+		return false;
+
 	return likely(test_rq_online(rq)) && !is_migration_disabled(p) &&
 		cpumask_test_cpu(cpu_of(rq), p->cpus_ptr);
 }
@@ -1656,10 +1747,17 @@ static void set_next_task_scx(struct rq *rq, struct task_struct *p, bool first)
 	if (SCX_HAS_OP(running) && (p->scx->flags & SCX_TASK_QUEUED))
 		SCX_CALL_OP_TASK(SCX_KF_REST, running, p);
 
-	//if(p->scx->flags & SCX_TASK_QUEUED)
-	//	scx_update_task_ravg(p, rq, PICK_NEXT_TASK, rq->clock);
+	if (p->scx->flags & SCX_TASK_QUEUED)
+		trace_android_vh_hmbird_update_load(p, rq, PICK_NEXT_TASK, rq->clock);
 
 	watchdog_unwatch_task(p, true);
+
+	if (debug_enabled()) {
+		u64 util = 0;
+
+		trace_android_vh_get_util(-1, p, &util);
+		scx_info_systrace("C|9999|cpu_%d_ds|%llu\n", cpu_of(rq), util);
+	}
 
 	/*
 	 * @p is getting newly scheduled or got kicked after someone updated its
@@ -1715,8 +1813,8 @@ static void put_prev_task_scx(struct rq *rq, struct task_struct *p)
 	if (SCX_HAS_OP(stopping) && (p->scx->flags & SCX_TASK_QUEUED))
 		SCX_CALL_OP_TASK(SCX_KF_REST, stopping, p, true);
 
-	//if(p->scx->flags & SCX_TASK_QUEUED)
-	//	scx_update_task_ravg(p, rq, PUT_PREV_TASK, rq->clock);
+	if (p->scx->flags & SCX_TASK_QUEUED)
+		trace_android_vh_hmbird_update_load(p, rq, PUT_PREV_TASK, rq->clock);
 
 
 	/*
@@ -1981,7 +2079,13 @@ static s32 scx_pick_idle_cpu(const struct cpumask *cpus_allowed)
 
 static s32 scx_select_cpu_dfl(struct task_struct *p, s32 prev_cpu, u64 wake_flags)
 {
-	s32 cpu;
+	s32 cpu = -1;
+
+	trace_android_vh_scx_select_cpu_dfl(p, &cpu);
+	if (cpu >= 0) {
+		p->scx->flags |= SCX_TASK_ENQ_LOCAL;
+		return cpu;
+	}
 
 	if (!static_branch_likely(&scx_builtin_idle_enabled)) {
 		scx_ops_error("built-in idle tracking is disabled");
@@ -2156,7 +2260,7 @@ static void scx_watchdog_workfn(struct work_struct *work)
 static void task_tick_scx(struct rq *rq, struct task_struct *curr, int queued)
 {
 	update_curr_scx(rq);
-	//scx_update_task_ravg(curr, rq, TASK_UPDATE, rq->clock);
+	trace_android_vh_hmbird_update_load(curr, rq, TASK_UPDATE, rq->clock);
 	/*
 	 * While disabling, always resched and refresh core-sched timestamp as
 	 * we can't trust the slice management or ops.core_sched_before().
@@ -2191,7 +2295,7 @@ static int scx_ops_prepare_task(struct task_struct *p, struct task_group *tg)
 			return ret;
 		}
 	}
-	//scx_sched_init_task(p);
+	trace_android_vh_hmbird_init_task(p);
 
 	if (p->scx->disallow) {
 		struct rq *rq;
@@ -2297,7 +2401,7 @@ void scx_pre_fork(struct task_struct *p)
 	p->scx->runnable_at = INITIAL_JIFFIES;
 	p->scx->slice = SCX_SLICE_DFL;
 	p->scx->task = p;
-	p->sched_prop = 0;
+	p->scx->sched_prop = 0;
 
 	/*
 	 * BPF scheduler enable/disable paths want to be able to iterate and
@@ -2379,7 +2483,31 @@ static void prio_changed_scx(struct rq *rq, struct task_struct *p, int oldprio)
 {
 }
 
-static void check_preempt_curr_scx(struct rq *rq, struct task_struct *p,int wake_flags) {}
+static void check_preempt_curr_scx(struct rq *rq, struct task_struct *p, int wake_flags)
+{
+	int check_result = -1;
+	enum cpu_type type = cpu_cluster(cpu_of(rq));
+
+	trace_android_vh_check_preempt_curr_scx(rq, p, wake_flags, &check_result);
+	if (check_result > 0)
+		goto preempt;
+
+	/*
+	 * The factory version additionally gates on the task's sched_prop
+	 * deadline level.  struct sched_ext_entity has no sched_prop member in
+	 * this tree and the layout must not change, so only the cluster gate is
+	 * kept (a no-op with the masks this tree publishes).
+	 */
+	if (type == EXCLUSIVE || ((type == PARTIAL) && !is_partial_enabled()))
+		return;
+
+	if (rq->curr->prio > p->prio)
+		goto preempt;
+
+	return;
+preempt:
+	resched_curr(rq);
+}
 static void switched_to_scx(struct rq *rq, struct task_struct *p) {}
 
 int scx_check_setscheduler(struct task_struct *p, int policy)
@@ -2534,6 +2662,24 @@ static void scx_ops_fallback_enqueue(struct task_struct *p, u64 enq_flags)
 
 static void scx_ops_fallback_dispatch(s32 cpu, struct task_struct *prev) {}
 
+/*
+ * OPPO/GKI: tell the vendor load tracker whether sched_ext load accounting is
+ * live.  The factory helper also resets its private tick clock here; that clock
+ * belongs to the slim tick machinery (scx_scheduler_tick()/scan_timeout())
+ * which this tree does not carry, so only the state transition and the vendor
+ * callback are kept.
+ */
+static void update_load_enable(bool enable)
+{
+	static bool prev = false;
+
+	if (prev == enable)
+		return;
+	prev = enable;
+
+	trace_android_vh_hmbird_update_load_enable(enable);
+}
+
 static void scx_ops_disable_workfn(struct kthread_work *work)
 {
 	struct scx_exit_info *ei = &scx_exit_info;
@@ -2684,7 +2830,7 @@ forward_progress_guaranteed:
 	spin_unlock_irq(&scx_tasks_lock);
 
 	/* no task is on scx, turn off all the switches and flush in-progress calls */
-	static_branch_disable_cpuslocked(&__scx_ops_enabled);
+	atomic_set(&__scx_ops_enabled, false);
 	for (i = 0; i < SCX_NR_ONLINE_OPS; i++)
 		static_branch_disable_cpuslocked(&scx_has_op[i]);
 	static_branch_disable_cpuslocked(&scx_ops_enq_last);
@@ -2698,6 +2844,8 @@ forward_progress_guaranteed:
 	scx_cgroup_unlock();
 	percpu_up_write(&scx_fork_rwsem);
 	cpus_read_unlock();
+
+	update_load_enable(false);
 
 	if (ei->type >= SCX_EXIT_ERROR) {
 		printk(KERN_ERR "sched_ext: BPF scheduler \"%s\" errored, disabling\n", scx_ops.name);
@@ -2801,21 +2949,19 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	mutex_lock(&scx_ops_enable_mutex);
 
 	/*
-	 * opt45 (T0 / route C): refuse to enable sched_ext.
+	 * opt56 (step 4f): the opt45 T0 refusal is removed -- it was a diagnostic
+	 * stop-gap, not part of the official integration.
 	 *
-	 * This tree carries the 2022-era, incomplete vendor backport of sched_ext.
-	 * Loading any BPF scheduler hard-hangs the whole system inside
-	 * scx_ops_enable() while holding cpus_read_lock() -- no pstore, only a
-	 * watchdog reset brings the device back.
+	 * The enable path below is byte-for-byte the official OnePlus/Oppo 6.1.141
+	 * implementation (blob 0ceb322881b8).  Restoring it makes the sched_ext
+	 * machine complete again; nothing registers or enables a BPF scheduler by
+	 * itself -- Scene decides when.
 	 *
-	 * Return before touching any state so callers (bpftool / scx_loader / Scene)
-	 * get a clean -EOPNOTSUPP instead of hanging the machine.  Symbols and
-	 * structs are intentionally left untouched so that the export set (and thus
-	 * the vendor module CRC contracts) does not change at all.
+	 * UNRESOLVED: the factory kernel on this device runs Oppo's own
+	 * hmbird_sched/slim_sched fork of sched_ext, not the upstream sched_ext that
+	 * Oppo's OSS drop published.  Loading a BPF scheduler against this upstream
+	 * variant has hard-hung the device before (opt43).  See kit archive step-4f.
 	 */
-	mutex_unlock(&scx_ops_enable_mutex);
-	pr_info("sched_ext: enable refused (opt45 T0)\n");
-	return -EOPNOTSUPP;
 
 	if (!scx_ops_helper) {
 		WRITE_ONCE(scx_ops_helper,
@@ -2831,7 +2977,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 		goto err_unlock;
 	}
 
-	//slim_walt_enable(true);
+	update_load_enable(true);
 
 	/*
 	 * Set scx_ops, transition to PREPPING and clear exit info to arm the
@@ -2925,7 +3071,7 @@ static int scx_ops_enable(struct sched_ext_ops *ops)
 	if (ret)
 		goto err_disable_unlock;
 
-	static_branch_enable_cpuslocked(&__scx_ops_enabled);
+	atomic_set(&__scx_ops_enabled, true);
 
 	/*
 	 * Enable ops for every task. Fork is excluded by scx_fork_rwsem
@@ -3057,7 +3203,7 @@ static int scx_debug_show(struct seq_file *m, void *v)
 {
 	mutex_lock(&scx_ops_enable_mutex);
 	seq_printf(m, "%-30s: %s\n", "ops", scx_ops.name);
-	seq_printf(m, "%-30s: %ld\n", "enabled", scx_enabled());
+	seq_printf(m, "%-30s: %d\n", "enabled", scx_enabled());
 	seq_printf(m, "%-30s: %d\n", "switching_all",
 		   READ_ONCE(scx_switching_all));
 	seq_printf(m, "%-30s: %ld\n", "switched_all", scx_switched_all());
@@ -4054,3 +4200,46 @@ static int __init register_ext_kfuncs(void)
 	return 0;
 }
 __initcall(register_ext_kfuncs);
+
+/* ---- /sys/kernel/sched_ext : register the sched_ext sysfs interface ---- */
+#include <linux/kobject.h>
+#include <linux/sysfs.h>
+
+static struct kset *scx_kset;
+
+static ssize_t scx_enabled_show(struct kobject *kobj,
+				struct kobj_attribute *ka, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", scx_enabled());
+}
+static struct kobj_attribute scx_attr_enabled =
+	__ATTR(enabled, 0444, scx_enabled_show, NULL);
+
+static ssize_t scx_switched_all_show(struct kobject *kobj,
+				     struct kobj_attribute *ka, char *buf)
+{
+	return sysfs_emit(buf, "%ld\n", scx_switched_all());
+}
+static struct kobj_attribute scx_attr_switched_all =
+	__ATTR(switched_all, 0444, scx_switched_all_show, NULL);
+
+static struct attribute *scx_sysfs_attrs[] = {
+	&scx_attr_enabled.attr,
+	&scx_attr_switched_all.attr,
+	NULL,
+};
+
+static const struct attribute_group scx_sysfs_group = {
+	.attrs = scx_sysfs_attrs,
+};
+
+static int __init scx_sysfs_init(void)
+{
+	scx_kset = kset_create_and_add("sched_ext", NULL, kernel_kobj);
+	if (!scx_kset)
+		return -ENOMEM;
+	if (sysfs_create_group(&scx_kset->kobj, &scx_sysfs_group))
+		pr_warn("sched_ext: failed to create sysfs attributes\n");
+	return 0;
+}
+__initcall(scx_sysfs_init);

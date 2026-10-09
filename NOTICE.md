@@ -1,26 +1,26 @@
-# 来源与许可标注（NOTICE）
+# NOTICE · 来源与致谢
 
-## 许可
-本仓库是 **Linux 内核源码**（GPL-2.0），许可证全文见仓库内 `COPYING`。
-对源码的任何修改与再分发，均遵守 **GPL-2.0**。
+本仓库是 **真我 GT5 Pro（RMX3888 / SM8650，6.1.141 OKI 基线）** 的内核源码树，许可证为 **GPL-2.0**（见 LICENSE）。
 
-## 上游来源（复刻/衍生说明）
-| 层级 | 来源 | 许可 |
-|---|---|---|
-| GKI 基底 | **AOSP `kernel/common`**（`android14-6.1`，Google）<br>`https://android.googlesource.com/kernel/common`（镜像 `github.com/aosp-mirror/kernel_common`） | GPL-2.0 |
-| 厂商源码 | **OPPO/oplus 官方开源** `android_kernel_common_oneplus_sm8650`（一加/OPPO/真我 SM8650 共用） | GPL-2.0 |
-| 参考项目 | 社区项目 `cctv18/oppo_oplus_realme_sm8650`（构建脚本与版本命名参考） | GPL-2.0 |
+> 整理者：**github@ltcdz5** ／ **酷安@天玑1100逆天功耗** ｜ 内容由 **DeepSeek** 协助整理
 
-## 本仓库的自有改动
-在厂商源码之上应用的内核补丁与配置调整（修复、CVE 回移、config 取舍等），
-逐版记录在配套仓库 **`gt5pro-kernel-kit`** 的台账文档中（含每版改动、验证结果与结论）。
+## 一、本仓库自身的改动
 
-## 致谢与借鉴
-- Root 方案：`tiann/KernelSU`、`ReSukiSU/ReSukiSU`、`SukiSU-Ultra`
-- SUSFS：`ShirkNeko/susfs4ksu`
-- lz4 1.10.0 / zstd 1.5.7 补丁：`ferstar`（移植 `Xiaomichael`）
-- 三星 SSG IO 调度器：社区整理
-- 内核补丁筛选方法：上游 `stable-queue` / ACK 台账
+- 设备树 / 构建配置 / 版本串标识等工程性改动
+- kernel/sched/hmbird_export.c —— 导出兼容层，本项目自行编写
 
-## 免责声明
-仅供研究与个人设备实验。刷写自编内核可能导致设备无法开机、数据丢失或失去保修，风险自负。
+## 二、沿用或改写的第三方来源（在此说明并致谢）
+
+| 文件 | 来源 |
+|---|---|
+| kernel/sched/hmbird_sched_proc_main.c · hmbird_sched_proc.h | 社区公开的 hmbird / 风驰 调度家族补丁（OP-PAD-3-SM8750 系列）|
+| kernel/sched/slim.h · slim_sysctl.c | 同上（slim / 风驰 相关接口）|
+| kernel/sched/ext.c · ext.h · build_policy.c · Makefile · include/linux/sched/ext.h · kernel/bpf/bpf_struct_ops_types.h · kernel/Kconfig.preempt · include/trace/hooks/sched.h · kernel/sched/debug.c · vendor_hooks.c | sched_ext 与调度接入相关的公开实现，以及本项目的接入改动 |
+
+**说明**：上述来源的许可状态并不完全明确。本项目在此**说明引用并致谢**；若相关权利人认为不妥，请联系后删除或调整。
+
+其余改动（F2FS、arm64、i2c、rpmsg、fwnode 等）来自 **AOSP / GKI 官方源码**与厂商公开的 GPL 内核源码。
+
+## 三、参考过但未包含其代码的项目
+
+ferstar 系列、reigadegr/sun_action、reigadegr/hmbird_controller、WildKernels/kernel_patches、wanwei1028/oneplus_hmbird_fix、murongruyan/cezai-hmbird-ko、TheVoyager0777/Platform_Phantom、xhai-git/SCRC 等 —— 仅作思路参考与致谢，本仓库不含其代码。

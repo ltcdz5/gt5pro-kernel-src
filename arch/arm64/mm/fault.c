@@ -542,6 +542,7 @@ static int __kprobes do_page_fault(unsigned long far, unsigned long esr,
 	unsigned int mm_flags = FAULT_FLAG_DEFAULT;
 	unsigned long addr = untagged_addr(far);
 	struct vm_area_struct *vma;
+	bool tried_vma_lock = false;
 
 	if (kprobe_page_fault(regs, esr))
 		return 0;
@@ -629,9 +630,15 @@ retry_vma:
 		return 0;
 	}
 
-	/* If the first try is only about waiting for the I/O to complete */
-	if (fault & VM_FAULT_RETRY_VMA)
+	/*
+	 * 首次只是等 I/O 完成时，重试一次无锁 VMA 路径；之后的 retry 一律走
+	 * mmap_lock（与上游 fall-through 语义一致），这样循环有上界，不会被
+	 * 持续的 VM_FAULT_RETRY_VMA 无限自旋。
+	 */
+	if ((fault & VM_FAULT_RETRY_VMA) && !tried_vma_lock) {
+		tried_vma_lock = true;
 		goto retry_vma;
+	}
 lock_mmap:
 
 retry:
