@@ -145,3 +145,4 @@ void perf_schedinfo_exit(
 {
 	remove_proc_entry("perf_schedinfo", pde);
 }
+EXPORT_SYMBOL_GPL(sched_ravg_window);
