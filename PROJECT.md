@@ -43,3 +43,7 @@ make -j16 LLVM=1 ARCH=arm64 \
 ## 许可
 
 GPL-2.0（与内核一致）。个人自编自用，仅供交流学习。
+
+## 已移除的第三方文件
+
+`slim.h` / `slim_sysctl.c` / `hmbird_sched_proc_main.c` / `hmbird_sched_proc.h` 以及 `kernel/oplus_cpu/sched_ext/`，因许可状态不明确已从本仓库移除，详见 NOTICE.md。

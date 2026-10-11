@@ -139,6 +139,8 @@ config SLIM_SCHED
 
 config HMBIRD_SCHED
 	bool "OPPO hmbird sched (/proc/hmbird_sched hub built into the kernel)"
+	# NOTE: the two helper units this option builds are NOT shipped in this
+	# repository (unclear licence); the option is kept for reference only.
 	depends on SCHED_CLASS_EXT
 	default n
 	help

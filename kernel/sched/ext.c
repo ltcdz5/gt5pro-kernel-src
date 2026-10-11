@@ -17,7 +17,8 @@
  * symbols.  Only the layout-neutral part is integrated -- see the kit report
  * "第5步b-风驰块1块2" for the itemised remainder.
  */
-#include "slim.h"
+extern int partial_enable;
+extern atomic_t __scx_ops_enabled;
 #include <trace/hooks/sched.h>
 
 /* task-event reasons consumed by android_vh_hmbird_update_load() */
