@@ -10,8 +10,8 @@
 /*
  * BLOCK1 (step 5b): the factory (OPPO/GKI) kernel/sched/ext.h carries an
  * include guard; the upstream file this tree started from does not.  build_policy.c
- * #includes ext.c and then (under CONFIG_HMBIRD_SCHED) slim_sysctl.c /
- * hmbird_sched_proc_main.c, and ext.h is reachable more than once through that
+ * #includes ext.c, and the OPPO hmbird/slim helper units used to be included
+ * here as well, and ext.h is reachable more than once through that
  * unit -- without a guard that is 20 "redefinition of scx_wake_flags" errors.
  */
 #ifndef __SCX_EXT_H
@@ -29,8 +29,9 @@
 /*
  * BLOCK1 (step 5b): OPPO/GKI debug + systrace helpers, taken from the ferstar
  * scx branch (kernel/sched/ext.h).  hmbirdcore_debug is owned by
- * kernel/sched/hmbird_sched_proc_main.c and also declared in slim.h; ext.c is
- * included before slim.h in build_policy.c, so it is declared here too.
+ * kernel/sched/hmbird_sched_proc_main.c (both since removed) and also
+ * declared in slim.h; ext.c is included first in build_policy.c, so it is
+ * declared here too.
  */
 #define DEBUG_INTERNAL		(1 << 0)
 #define DEBUG_INFO_TRACE	(1 << 1)

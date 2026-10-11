@@ -39,10 +39,11 @@ EXPORT_SYMBOL_GPL(slim_for_app);
  *
  * ext.c is compiled whenever CONFIG_SCHED_CLASS_EXT=y, i.e. also when
  * CONFIG_HMBIRD_SCHED=n -- and in that configuration
- * kernel/sched/hmbird_sched_proc_main.c / slim_sysctl.c (the previous owners
+ * kernel/sched/hmbird_sched_proc_main.c / slim_sysctl.c (the previous owners,
+ * since removed from this repository)
  * of these three) are not built at all.  Same rule as the ten symbols above:
  * "These variables must be defined outside of CONFIG_HMBIRD_SCHED MICRO."
- * The /proc writers in hmbird_sched_proc_main.c reach them through slim.h.
+ * The /proc writers in hmbird_sched_proc_main.c used to reach them via slim.h.
  */
 int hmbirdcore_debug;
 int partial_enable;
