@@ -22,6 +22,10 @@
 - 本仓库**不包含任何厂商二进制、也不包含无明确许可证的第三方代码**
 - 与厂商模块相关的符号/导出对齐，只以**数字与结论**的形式记录在工具仓库 `gt5pro-kernel-kit`
 
+## 当前状态
+
+- 现役版本串：`6.1.141-android14-11-o-ltcdz5-v1.1-opt162`；配套用户态方案见 `gt5pro-hmbird`
+- 本仓库**不提供** opt162 的完整快照：`opt61` 起引入的 `kernel/sched/hmbird/` 家族依赖未在本仓库提供的 `slim.h` / `slim_sysctl.c`，二者只能同进同退（详见 `STATUS.md` 与 `NOTICE.md` §三）
 ## 怎么构建
 
 ~~~bash
