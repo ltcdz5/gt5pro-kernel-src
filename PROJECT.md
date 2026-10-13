@@ -26,6 +26,7 @@
 
 - 现役版本串：`6.1.141-android14-11-o-ltcdz5-v1.1-opt162`；配套用户态方案见 `gt5pro-hmbird`
 - 本仓库**不提供** opt162 的完整快照：`opt61` 起引入的 `kernel/sched/hmbird/` 家族依赖未在本仓库提供的 `slim.h` / `slim_sysctl.c`，二者只能同进同退（详见 `STATUS.md` 与 `NOTICE.md` §三）
+
 ## 怎么构建
 
 ~~~bash
