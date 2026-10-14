@@ -19,13 +19,14 @@
 
 ## 不含什么（重要）
 
-- 本仓库**不包含任何厂商二进制、也不包含无明确许可证的第三方代码**
+- 本仓库**不包含任何厂商二进制、也不包含来源可追溯性未确认的第三方代码**
 - 与厂商模块相关的符号/导出对齐，只以**数字与结论**的形式记录在工具仓库 `gt5pro-kernel-kit`
 
 ## 当前状态
 
 - 现役版本串：`6.1.141-android14-11-o-ltcdz5-v1.1-opt162`；配套用户态方案见 `gt5pro-hmbird`
-- 本仓库**不提供** opt162 的完整快照：`opt61` 起引入的 `kernel/sched/hmbird/` 家族依赖未在本仓库提供的 `slim.h` / `slim_sysctl.c`，二者只能同进同退（详见 `STATUS.md` 与 `NOTICE.md` §三）
+- 本仓库跟进到 **opt162**，但**不包含** `kernel/sched/hmbird/` 家族及其依赖的 `slim.h` / `slim_sysctl.c`（二者只能同进同退，详见 `STATUS.md` 与 `NOTICE.md` §三）
+- 与这些单元对接的钩子仍在树里，由 `CONFIG_HMBIRD_SCHED_CORE` 保护、默认 N，**不参与编译**
 
 ## 怎么构建
 
@@ -51,4 +52,4 @@ GPL-2.0（与内核一致）。个人自编自用，仅供交流学习。
 
 ## 已移除的第三方文件
 
-`slim.h` / `slim_sysctl.c` / `hmbird_sched_proc_main.c` / `hmbird_sched_proc.h` 以及 `kernel/oplus_cpu/sched_ext/`，因许可状态不明确已从本仓库移除，详见 NOTICE.md。
+`slim.h` / `slim_sysctl.c` / `hmbird_sched_proc_main.c` / `hmbird_sched_proc.h` 以及 `kernel/oplus_cpu/sched_ext/`，因**来源可追溯性未确认**已从本仓库移除，详见 NOTICE.md。

@@ -507,6 +507,16 @@ static inline void cpufreq_resume(void) {}
 /* Policy Notifiers  */
 #define CPUFREQ_CREATE_POLICY		(0)
 #define CPUFREQ_REMOVE_POLICY		(1)
+/*
+ * t93 (opt160): governor-switch veto event.
+ *
+ * 0..3 are reserved for mainline (CREATE 0, REMOVE 1, ADJUST 2,
+ * INCOMPATIBLE 3).  This tree has neither ADJUST nor INCOMPATIBLE, and our
+ * payload is a "struct cpufreq_governor *" (the *target* governor) rather
+ * than mainline ADJUST's "struct cpufreq_policy *", so the number must not
+ * be reused.  Call site: cpufreq_set_policy() in drivers/cpufreq/cpufreq.c.
+ */
+#define CPUFREQ_GOV_VETO		(4)
 
 #ifdef CONFIG_CPU_FREQ
 int cpufreq_register_notifier(struct notifier_block *nb, unsigned int list);
@@ -1230,4 +1240,9 @@ static inline void cpufreq_register_em_with_opp(struct cpufreq_policy *policy)
 	dev_pm_opp_of_register_em(get_cpu_device(policy->cpu),
 				  policy->related_cpus);
 }
+/* Stage B: provided by drivers/cpufreq/cpufreq.c for the hmbird family. */
+struct cpufreq_policy;
+ssize_t store_scaling_governor(struct cpufreq_policy *policy,
+				const char *buf, size_t count);
+
 #endif /* _LINUX_CPUFREQ_H */

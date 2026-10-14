@@ -40,8 +40,8 @@ EXPORT_SYMBOL_GPL(slim_for_app);
  * ext.c is compiled whenever CONFIG_SCHED_CLASS_EXT=y, i.e. also when
  * CONFIG_HMBIRD_SCHED=n -- and in that configuration
  * kernel/sched/hmbird_sched_proc_main.c / slim_sysctl.c (the previous owners,
- * since removed from this repository)
- * of these three) are not built at all.  Same rule as the ten symbols above:
+ * neither shipped in this repository) are not built at all.  Same rule as the
+ * ten symbols above:
  * "These variables must be defined outside of CONFIG_HMBIRD_SCHED MICRO."
  * The /proc writers in hmbird_sched_proc_main.c used to reach them via slim.h.
  */
@@ -105,6 +105,45 @@ struct scx_iso_masks {
 
 struct scx_iso_masks iso_masks;
 EXPORT_SYMBOL_GPL(iso_masks);
+
+/*
+ * Stage N: 出厂这些隔离掩码由厂商侧分配；我们的内核里没有任何人调用
+ * alloc_cpumask_var()，于是 5 个 cpumask_var_t 一直是 NULL。
+ * 启用调度器后 get_cpus_max_util(iso_masks.partial) 用 NULL 掩码做
+ * for_each_cpu，直接 NULL 解引用（实测 pc: get_cpus_max_util+0xc8，
+ * 故障地址 0x100）。启动时一次性分配好。
+ */
+static bool iso_masks_ready;
+
+/*
+ * Stage O: 幂等的"确保已分配"。early_initcall 在启动早期可能拿不到内存、
+ * 或调用点被别的初始化抢了先后；这里做成可重复调用，并且在 enable 路径
+ * (ext_ctrl) 开头再确保一次 —— 那条路一定会在调度器跑起来之前执行。
+ */
+void hmbird_iso_masks_ensure(void)
+{
+	if (iso_masks_ready)
+		return;
+
+	if (zalloc_cpumask_var(&iso_masks.ex_free, GFP_KERNEL) &&
+	    zalloc_cpumask_var(&iso_masks.exclusive, GFP_KERNEL) &&
+	    zalloc_cpumask_var(&iso_masks.partial, GFP_KERNEL) &&
+	    zalloc_cpumask_var(&iso_masks.big, GFP_KERNEL) &&
+	    zalloc_cpumask_var(&iso_masks.little, GFP_KERNEL)) {
+		iso_masks_ready = true;
+		pr_info("hmbird: iso_masks allocated (Stage O)");
+	} else {
+		pr_err("hmbird: iso_masks allocation failed");
+	}
+}
+
+static int __init hmbird_iso_masks_init(void)
+{
+	hmbird_iso_masks_ensure();
+	return 0;
+}
+early_initcall(hmbird_iso_masks_init);
+
 
 /*
  * Size of the hmbird minidump region.  The factory kernel hands out a
@@ -182,8 +221,6 @@ static int __init hmbird_export_init(void)
 		return -ENOMEM;
 	}
 
-	cpumask_setall(iso_masks.big);
-	cpumask_setall(iso_masks.little);
 
 	hmbird_md_addr = kzalloc(HMBIRD_MD_SIZE, GFP_KERNEL);
 	if (!hmbird_md_addr)

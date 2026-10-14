@@ -95,6 +95,13 @@
 #include "../../io_uring/io-wq.h"
 #include "../smpboot.h"
 
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+#include "hmbird/slim.h"
+#include "hmbird/hmbird_shadow_tick.h"
+#include "hmbird.h"
+extern bool reject_change_to_hmbird(struct task_struct *p, int prio);
+#endif
+
 #include <trace/hooks/sched.h>
 #include <trace/hooks/dtask.h>
 #include <trace/hooks/cgroup.h>
@@ -189,6 +196,10 @@ static inline int __task_prio(struct task_struct *p)
 #ifdef CONFIG_SCHED_CLASS_EXT
 	if (p->sched_class == &ext_sched_class)
 		return MAX_RT_PRIO + MAX_NICE + 1; /* 120, squash ext */
+#endif
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	if (p->sched_class == &hmbird_sched_class)
+		return MAX_RT_PRIO + MAX_NICE + 1; /* 120, squash hmbird */
 #endif
 
 	return MAX_RT_PRIO + MAX_NICE; /* 119, squash fair */
@@ -1263,6 +1274,17 @@ bool sched_can_stop_tick(struct rq *rq)
 
 	if (scx_enabled() && !scx_can_stop_tick(rq))
 		return false;
+
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	/*
+	 * Stage C: the hmbird class has the same "ask the class" contract.
+	 */
+	if (!hmbird_enabled() && rq->nr_running > 1)
+		return false;
+
+	if (hmbird_enabled() && !hmbird_can_stop_tick(rq))
+		return false;
+#endif
 
 	return true;
 }
@@ -3699,7 +3721,12 @@ int select_task_rq(struct task_struct *p, int cpu, int wake_flags)
 	 * [ this allows ->select_task() to simply return task_cpu(p) and
 	 *   not worry about this generic constraint ]
 	 */
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	if (unlikely(!is_cpu_allowed(p, cpu)) &&
+	    (p->sched_class != &hmbird_sched_class))
+#else
 	if (unlikely(!is_cpu_allowed(p, cpu)))
+#endif
 		cpu = select_fallback_rq(task_cpu(p), p);
 
 	return cpu;
@@ -4839,6 +4866,9 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	}
 
 	scx_pre_fork(p);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	hmbird_pre_fork(p);
+#endif
 
 	if (dl_prio(p->prio)) {
 		ret = -EAGAIN;
@@ -4846,6 +4876,11 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 #ifdef CONFIG_SCHED_CLASS_EXT
 	} else if (task_on_scx(p)) {
 		p->sched_class = &ext_sched_class;
+#endif
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	} else if (task_on_hmbird(p) && !reject_change_to_hmbird(p, p->prio)) {
+		/* Stage AT: 高优先级 RT 任务不切进 hmbird 类（参考实现 diff core.c:1120 的语义） */
+		p->sched_class = &hmbird_sched_class;
 #endif
 	} else if (rt_prio(p->prio)) {
 		p->sched_class = &rt_sched_class;
@@ -4873,6 +4908,9 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 
 out_cancel:
 	scx_cancel_fork(p);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	hmbird_cancel_fork(p);
+#endif
 	return ret;
 }
 
@@ -4904,18 +4942,36 @@ int sched_cgroup_fork(struct task_struct *p, struct kernel_clone_args *kargs)
 		p->sched_class->task_fork(p);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	hmbird_fork(p);
+#endif
 	return scx_fork(p);
 }
 
 void sched_cancel_fork(struct task_struct *p)
 {
 	scx_cancel_fork(p);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	/*
+	 * Stage T: 与 sched_post_fork() 对称。hmbird_pre_fork() 分配了实体并持有
+	 * hmbird_fork_rwsem 的读锁，fork 失败这条路径原来完全不收尾：实体泄漏，
+	 * 而且读锁永远不释放 —— 之后 enable/disable 里的 percpu_down_write()
+	 * 会永久阻塞（整机停摆的典型成因）。
+	 * 不会重复释放：sched_fork() 的 out_cancel 只在 sched_fork 自身失败时走，
+	 * 而 kernel/fork.c 的 bad_fork_sched_cancel_fork 只在 sched_fork 成功后的
+	 * 失败路径触发，两者互斥。
+	 */
+	hmbird_cancel_fork(p);
+#endif
 }
 
 void sched_post_fork(struct task_struct *p)
 {
 	uclamp_post_fork(p);
 	scx_post_fork(p);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	hmbird_post_fork(p);
+#endif
 }
 
 u64 to_ratio(u64 period, u64 runtime)
@@ -5771,16 +5827,28 @@ void scheduler_tick(void)
 		resched_latency_warn(cpu, resched_latency);
 
 	scx_notify_sched_tick();
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	hmbird_notify_sched_tick();
+#endif
 	perf_event_task_tick();
 
 #ifdef CONFIG_SMP
 	if (!scx_switched_all()) {
-		rq->idle_balance = idle_cpu(cpu);
-		trigger_load_balance(rq);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+		if (!hmbird_enabled()) {
+#endif
+			rq->idle_balance = idle_cpu(cpu);
+			trigger_load_balance(rq);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+		}
+#endif
 	}
 #endif
 
 	trace_android_vh_scheduler_tick(rq);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	scheduler_tick_handler(NULL, NULL);
+#endif
 }
 
 #ifdef CONFIG_NO_HZ_FULL
@@ -6089,10 +6157,54 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 	 * We can terminate the balance pass as soon as we know there is
 	 * a runnable task of @class priority or higher.
 	 */
+	#ifdef CONFIG_HMBIRD_SCHED_CORE
+	/*
+	 * Stage BN（= BM 的加固形态 B2）★根因修复★
+	 *
+	 * 背景：绑定任务（nr_cpus_allowed==1 → per_cpu(pcp_ldsq, cpu)）与超时任务
+	 * 的唯一消费者是 consume_pcp_dsq()，而它的全部调用点都在
+	 * balance_one() ← balance_hmbird() 之内（_audit/报告-BL-研究.md）。
+	 * 而 balance_hmbird() 在本改动之前【从未被调用】：
+	 *   - prev 自己就是 hmbird 任务时：能到（所以偶尔能跑）
+	 *   - prev ∈ {stop,dl,rt}：被各自类的 balance() 返回 1 断链
+	 *   - prev = fair：被 fair.c: balance_fair() 的 "if (rq->nr_running) return 1"
+	 *     断链（hmbird 入队时 add_nr_running(rq,1) ⇒ 恒非 0）
+	 *   - prev = idle：被 ext.h 的 for_balance_class_range 钳位到 &ext_sched_class，
+	 *     而 hmbird 夹在 fair 与 ext 之间 ⇒ 不在扫描范围 [ext, idle) 内
+	 * ⇒ 绑定 worker 入队即永久搁浅，实测表现：启用瞬间 cpus1-7 的 workqueue
+	 *   池全部停摆（LAST_KMSG_opt118b.txt 93.937s "stuck for 50~60s" 反推）。
+	 *
+	 * Stage BM 曾在循环【之前】调用并 goto 跳过整段扫描；但那会连 rt/dl 的
+	 * balance（pull_rt_task/pull_dl_task）一起跳过 —— opt120 实测启用后 4 秒
+	 * 硬挂在 WALT 的 newidle_balance → walt_lb_pull_tasks → deactivate_task
+	 * （伴 psi: inconsistent task state!），与此高度相关。
+	 *
+	 * 因此改为 B2 形态：**类扫描照常进行**（rt/dl/fair 行为完全不变），
+	 * 若扫描没有碰到 hmbird 类，再在扫描后兜底调用一次 hmbird 的 balance。
+	 * 用 saw_hmbird 避免重复调用。
+	 *
+	 * 整段在 CONFIG_HMBIRD_SCHED_CORE=n（对外发布镜像）时不编译。
+	 */
+	extern atomic_t __hmbird_ops_enabled;
+	extern const struct sched_class hmbird_sched_class;
+	bool hmbird_saw_in_scan = false;
+	#endif
+
 	for_balance_class_range(class, prev->sched_class, &idle_sched_class) {
+	#ifdef CONFIG_HMBIRD_SCHED_CORE
+		if (class == &hmbird_sched_class)
+			hmbird_saw_in_scan = true;
+	#endif
 		if (class->balance(rq, prev, rf))
 			break;
 	}
+
+	#ifdef CONFIG_HMBIRD_SCHED_CORE
+	/* 扫描没碰到 hmbird（绝大概率如此）⇒ 兜底调用，确保 DSQ 有消费者 */
+	if (!hmbird_saw_in_scan && atomic_read(&__hmbird_ops_enabled) &&
+		hmbird_sched_class.balance)
+		hmbird_sched_class.balance(rq, prev, rf);
+	#endif
 #endif
 
 	put_prev_task(rq, prev);
@@ -6139,6 +6251,9 @@ restart:
 		p = class->pick_next_task(rq);
 		if (p) {
 			scx_notify_pick_next_task(rq, p, class);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+			hmbird_notify_pick_next_task(rq, p, class);
+#endif
 			return p;
 		}
 	}
@@ -6812,6 +6927,9 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		psi_sched_switch(prev, next, !task_on_rq_queued(prev));
 
 		trace_sched_switch(sched_mode & SM_MASK_PREEMPT, prev, next, prev_state);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+		sched_switch_handler(NULL, sched_mode & SM_MASK_PREEMPT, prev, next, prev_state);
+#endif
 
 		/* Also unlocks the rq: */
 		rq = context_switch(rq, prev, next, &rf);
@@ -7155,6 +7273,10 @@ void __setscheduler_prio(struct task_struct *p, int prio)
 #ifdef CONFIG_SCHED_CLASS_EXT
 	else if (task_on_scx(p))
 		p->sched_class = &ext_sched_class;
+#endif
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	else if (task_on_hmbird(p))
+		p->sched_class = &hmbird_sched_class;
 #endif
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
@@ -7840,6 +7962,11 @@ recheck:
 	if (retval)
 		goto unlock;
 
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	retval = hmbird_check_setscheduler(p, policy);
+	if (retval)
+		goto unlock;
+#endif
 	/*
 	 * If not changing anything there's no need to proceed further,
 	 * but store a possible modification of reset_on_fork.
@@ -9100,6 +9227,11 @@ SYSCALL_DEFINE1(sched_get_priority_max, int, policy)
 	case SCHED_DEADLINE:
 	case SCHED_NORMAL:
 	case SCHED_BATCH:
+	/*
+	 * Stage C: SCHED_HMBIRD == SCHED_EXT == 7 in this tree, so the
+	 * SCHED_EXT label above already covers it -- a second label would be
+	 * a duplicate-case error.
+	 */
 	case SCHED_IDLE:
 	case SCHED_EXT:
 		ret = 0;
@@ -9128,6 +9260,11 @@ SYSCALL_DEFINE1(sched_get_priority_min, int, policy)
 	case SCHED_DEADLINE:
 	case SCHED_NORMAL:
 	case SCHED_BATCH:
+	/*
+	 * Stage C: SCHED_HMBIRD == SCHED_EXT == 7 in this tree, so the
+	 * SCHED_EXT label above already covers it -- a second label would be
+	 * a duplicate-case error.
+	 */
 	case SCHED_IDLE:
 	case SCHED_EXT:
 		ret = 0;
@@ -9995,6 +10132,10 @@ void __init sched_init(void)
 	BUG_ON(!sched_class_above(&dl_sched_class, &rt_sched_class));
 	BUG_ON(!sched_class_above(&rt_sched_class, &fair_sched_class));
 	BUG_ON(!sched_class_above(&fair_sched_class, &idle_sched_class));
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	WARN_ON_ONCE(!sched_class_above(&fair_sched_class, &hmbird_sched_class));
+	WARN_ON_ONCE(!sched_class_above(&hmbird_sched_class, &idle_sched_class));
+#endif
 #ifdef CONFIG_SCHED_CLASS_EXT
 	BUG_ON(!sched_class_above(&fair_sched_class, &ext_sched_class));
 	BUG_ON(!sched_class_above(&ext_sched_class, &idle_sched_class));
@@ -10167,6 +10308,9 @@ void __init sched_init(void)
 	balance_push_set(smp_processor_id(), false);
 #endif
 	init_sched_fair_class();
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	init_sched_hmbird_class();
+#endif
 	init_sched_ext_class();
 
 	psi_init();
@@ -10635,6 +10779,10 @@ static int cpu_cgroup_css_online(struct cgroup_subsys_state *css)
 	struct task_group *tg = css_tg(css);
 	struct task_group *parent = css_tg(css->parent);
 
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	hmbird_tg_online(tg);
+#endif
+
 	if (parent)
 		sched_online_group(tg, parent);
 
@@ -10685,13 +10833,76 @@ static int cpu_cgroup_can_attach(struct cgroup_taskset *tset)
 }
 #endif
 
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+/*
+ * Stage C: cgroup -> hmbird deadline index plumbing (mirrors the OPPO tree).
+ */
+static inline void update_cgroup_ids_table(int ids, u8 hmbird_cgroup_deadline_idx)
+{
+	if (ids < 0 || ids >= NUMS_CGROUP_KINDS) {
+		pr_err("update_cgroup_ids_tab idx err!\n");
+		return;
+	}
+	cgroup_ids_table[ids] = hmbird_cgroup_deadline_idx;
+}
+
+static int cgroup_write_hmbird_deadline(struct cgroup_subsys_state *css,
+					struct cftype *cftype, u64 dl)
+{
+	int i;
+
+	for (i = MIN_CGROUP_DL_IDX; i < MAX_GLOBAL_DSQS; ++i) {
+		if (dl < HMBIRD_BPF_DSQS_DEADLINE[i])
+			break;
+	}
+
+	i = max_t(int, i - 1, MIN_CGROUP_DL_IDX);
+	if (!css || !css->cgroup || !css->cgroup->kn)
+		return 0;
+	update_cgroup_ids_table(css->cgroup->kn->id, i);
+
+	return 0;
+}
+
+static u64 cgroup_read_hmbird_deadline(struct cgroup_subsys_state *css,
+				       struct cftype *cft)
+{
+	u8 i;
+
+	if (!css || !css->cgroup || !css->cgroup->kn)
+		return (u64)HMBIRD_BPF_DSQS_DEADLINE[DEFAULT_CGROUP_DL_IDX];
+	i = min_t(u8, cgroup_ids_table[css->cgroup->kn->id], MAX_GLOBAL_DSQS - 1);
+	return (u64)HMBIRD_BPF_DSQS_DEADLINE[i];
+}
+
+static void hmbird_change_rt_sched_prop(struct cgroup_subsys_state *css,
+					struct task_struct *p, int prio)
+{
+	if (!css || !rt_prio(prio))
+		return;
+
+	if (!(hmbird_get_sched_prop(p) & SCHED_PROP_DEADLINE_MASK)) {
+		if (!strcmp(css->cgroup->kn->name, "display"))
+			hmbird_set_sched_prop(p, SCHED_PROP_DEADLINE_LEVEL3);
+		else if (!strcmp(css->cgroup->kn->name, "touch"))
+			hmbird_set_sched_prop(p, SCHED_PROP_DEADLINE_LEVEL2);
+		else if (!strcmp(css->cgroup->kn->name, "multimedia"))
+			hmbird_set_sched_prop(p, SCHED_PROP_DEADLINE_LEVEL1);
+	}
+}
+#endif /* CONFIG_HMBIRD_SCHED_CORE */
+
 static void cpu_cgroup_attach(struct cgroup_taskset *tset)
 {
 	struct task_struct *task;
 	struct cgroup_subsys_state *css;
 
-	cgroup_taskset_for_each(task, css, tset)
+	cgroup_taskset_for_each(task, css, tset) {
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+		hmbird_change_rt_sched_prop(css, task, task->prio);
+#endif
 		sched_move_task(task);
+	}
 
 	trace_android_rvh_cpu_cgroup_attach(tset);
 }
@@ -11346,6 +11557,13 @@ static struct cftype cpu_legacy_files[] = {
 		.name = "schedtune.boost",
 		.read_s64 = schedtune_boost_read,
 		.write_s64 = schedtune_boost_write,
+	},
+#endif
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	{
+		.name = "hmbird.deadline",
+		.read_u64 = cgroup_read_hmbird_deadline,
+		.write_u64 = cgroup_write_hmbird_deadline,
 	},
 #endif
 	{ }	/* Terminate */

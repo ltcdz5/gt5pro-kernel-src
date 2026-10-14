@@ -196,7 +196,12 @@ static inline int normal_policy(int policy)
 
 static inline int fair_policy(int policy)
 {
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	return policy == SCHED_HMBIRD || normal_policy(policy) ||
+	       policy == SCHED_BATCH;
+#else
 	return normal_policy(policy) || policy == SCHED_BATCH;
+#endif
 }
 
 static inline int rt_policy(int policy)
@@ -3393,5 +3398,16 @@ static inline void update_current_exec_runtime(struct task_struct *curr,
 extern bool cpu_busy_with_softirqs(int cpu);
 
 #include "ext.h"
+
+/*
+ * Stage B: the OPPO hmbird sched_class family.  Included at the very end of
+ * sched.h (exactly like the OPPO tree's "#include "hmbird.h"" tail) so that
+ * struct rq and the class-iteration helpers are in scope.  Gated on
+ * CONFIG_HMBIRD_SCHED_CORE so the shipped gki_defconfig build (which leaves
+ * it n) stays byte-for-byte unchanged.
+ */
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+#include "hmbird.h"
+#endif
 
 #endif /* _KERNEL_SCHED_SCHED_H */

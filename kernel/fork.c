@@ -960,6 +960,17 @@ void __put_task_struct(struct task_struct *tsk)
 	WARN_ON(tsk == current);
 
 	sched_ext_free(tsk);
+#ifdef CONFIG_HMBIRD_SCHED_CORE
+	/*
+	 * Stage AI: hmbird 实体的收尾必须挂在【任务真正销毁】的路径上，即这里。
+	 * Stage AG 原来挂在 free_task()，而 free_task() 也被 fork 失败路径
+	 * （delayed_free_task）调用：那时子任务的 android_oem_data1[1] 还是父任务
+	 * 实体的逐字节拷贝（arch_dup_task_struct），hmbird_free(子) 会把父任务的
+	 * 实体摘链并 kfree ⇒ 父任务 UAF。__put_task_struct 只有引用计数归零才走到，
+	 * 与 sched_ext_free() 同点，fork 失败路径永远到不了这里。
+	 */
+	hmbird_free(tsk);
+#endif
 	io_uring_free(tsk);
 	cgroup_free(tsk);
 	task_numa_free(tsk, true);

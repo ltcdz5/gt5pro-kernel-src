@@ -3225,7 +3225,20 @@ account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		struct rq *rq = rq_of(cfs_rq);
 
 		account_numa_enqueue(rq, task_of(se));
+	#ifdef CONFIG_HMBIRD_SCHED_CORE
+		/*
+		 * Stage BS（P0b 兜底）：若某个非 fair 类任务的 group_node 已被
+		 * 挂进 cfs_tasks（厂商 WALT 的 MVP 抢跑路径会这么做，见上面 P0 的说明），
+		 * 这里原来的 list_add 就是 "list_add double add" 致命 BUG。
+		 * list_move（= __list_del_entry + list_add 到表头）对「自发链」与
+		 * 「已挂链」两种状态都安全，且加到表头的语义与 list_add 完全一致，
+		 * 因此这里既保持原语义、又把致命的 BUG() 变成一条可诊断的 WARN。
+		 */
+		WARN_ON_ONCE(!se->on_rq && !list_empty(&se->group_node));
+		list_move(&se->group_node, &rq->cfs_tasks);
+	#else
 		list_add(&se->group_node, &rq->cfs_tasks);
+	#endif
 	}
 #endif
 	cfs_rq->nr_running++;
@@ -4988,6 +5001,37 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 		return;
 
 	se = __pick_first_entity(cfs_rq);
+	/*
+	 * Stage FIX-CPT: __pick_first_entity() returns NULL when the cfs_rq's
+	 * red-black tree is empty.  Upstream assumes that cannot happen because
+	 * check_preempt_tick() is only reached when cfs_rq->nr_running > 1
+	 * (fair.c:5172).  That assumption breaks when the hmbird sched_class is
+	 * active: hmbird tasks never set se.on_rq, so a task can be counted in
+	 * nr_running while not being present in tasks_timeline.
+	 *
+	 * Observed on RMX3888 / opt151:
+	 *   Unable to handle kernel NULL pointer dereference at 0x50
+	 *   pc : task_tick_fair+0x23c/0x3ac
+	 *   scheduler_tick_no_balance+0xbc/0x130 [oplus_bsp_sched_ext]
+	 * 0x50 is se->vruntime with se == NULL; the faulting instruction is
+	 * ldr x10,[x22,#0x50] at fair.c:5004.
+	 *
+	 * With an empty tree there is nothing to preempt the current entity
+	 * with, so returning is equivalent to the existing early exits above
+	 * (skip_preempt / delta_exec < min_granularity).  No behaviour change
+	 * on any healthy path.
+	 */
+	if (!se) {
+		/*
+		 * opt154 P0-3: 量化触发频率。
+		 * 本机 cmdline 无 panic_on_warn（实测 /proc/sys/kernel/panic_on_warn = 0），
+		 * 所以这条 WARN 只会打印，不会 panic。
+		 * 期望：若 hmbird 未启用则 0 次；启用后频率即 nr_running 不一致的严重程度。
+		 */
+		WARN_ON_ONCE(cfs_rq->nr_running > 1);
+		return;
+	}
+	
 	delta = curr->vruntime - se->vruntime;
 
 	if (delta < 0)
@@ -7903,6 +7947,53 @@ again:
 }
 #endif
 
+/*
+ * Stage CB ★CA 研究报告的 F1★：pick_next_entity() 返回 NULL 时的兜底。
+ *
+ * 背景（CA 子代理对全部现场的反汇编比对）：opt128 的 set_next_entity+0xb4
+ * 就是 ldr w8,[x19,#0x38]（se->on_rq）而 x19=se=NULL；opt127 的
+ * pick_next_task_fair+0x214 是 group_cfs_rq(NULL) 读 [x0+0x80]。两者是
+ * 同一条不变式的两个出口。
+ *
+ * 关键修正：这【不一定是】"计数与树分叉"。__pick_first_entity() 只读
+ * rb_first_cached() = root->rb_leftmost；而 rb_erase_cached() 在真正 erase
+ * 【之前】就执行 root->rb_leftmost = rb_next(node) —— 一旦被擦的是一个
+ * 【不在树上的节点】，rb_next 可能给出 NULL，而 nr_running 一动不动。
+ * 这种情形是【恒等式问题】：用真遍历 rb_first(&rb_root) 重算 rb_leftmost
+ * 就能修好，不可能更错。
+ *
+ * 若真遍历也空，那就是树真的空了（计数失配），【不可自愈】：只打印并让
+ * 调用方走 idle 降级，绝不 panic。
+ *
+ * 注意：CA 报告明确否决了"在 put_prev_entity/set_next_entity 里加树空自愈"
+ * 的做法（两种成因的正确动作相反、幽灵实体身份已丢、会把 panic 变成静默
+ * 调度错乱）。这里只做恒等式修复 + 降级，不做自愈。
+ */
+static inline struct sched_entity *hmbird_cb_rescue_se(struct rq *rq,
+						      struct cfs_rq *cfs_rq,
+						      struct sched_entity *curr)
+{
+	struct sched_entity *se = pick_next_entity(cfs_rq, curr);
+	struct rb_node *real;
+
+	if (likely(se))
+		return se;
+
+	real = rb_first(&cfs_rq->tasks_timeline.rb_root);
+	if (real) {
+		pr_debug_ratelimited("hmbird-dbg: CB fix rb_leftmost cpu=%d nr=%d cached=%px real=%px\n",
+			cpu_of(rq), cfs_rq->nr_running,
+			(void *)rb_first_cached(&cfs_rq->tasks_timeline), (void *)real);
+		cfs_rq->tasks_timeline.rb_leftmost = real;
+		se = pick_next_entity(cfs_rq, curr);
+	}
+	if (unlikely(!se))
+		pr_debug_ratelimited("hmbird-dbg: CB NULL se cpu=%d nr=%d curr=%px next=%px last=%px skip=%px\n",
+			cpu_of(rq), cfs_rq->nr_running, (void *)curr,
+			(void *)cfs_rq->next, (void *)cfs_rq->last, (void *)cfs_rq->skip);
+	return se;
+}
+
 struct task_struct *
 pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -7959,7 +8050,15 @@ again:
 			}
 		}
 
-		se = pick_next_entity(cfs_rq, curr);
+		se = hmbird_cb_rescue_se(rq, cfs_rq, curr);   /* Stage CB (F1) */
+		if (unlikely(!se)) {
+			/* Stage CD（CB-2）：idle 里 new_tasks>0 会回到 again:，
+			 * 而 again: 不复位 cfs_rq ⇒ 必须在这里把它复位到根，
+			 * 否则重入后从内层 group cfs_rq 继续 pick。照 8013 行既有范式。
+			 */
+			cfs_rq = &rq->cfs;
+			goto idle;
+		}
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
 
@@ -7998,11 +8097,41 @@ simple:
 		put_prev_task(rq, prev);
 
 	trace_android_rvh_replace_next_task_fair(rq, &p, &se, &repick, true, prev);
-	if (repick)
+	/*
+	 * Stage CB/CD（CA 报告 F2；CB 审核修正 CB-1/CB-3）：
+	 * repick 之前已经 put_prev_task() 过，cfs_rq->curr 可能已被置 NULL；
+	 * 若选中的任务不是 fair 类，直接 goto done 会带着对 fair 队列无效的 se
+	 * 走到 set_next_entity。
+	 *
+	 * ★绝不要 goto simple★：simple: 就是 put_prev_task() 本身，重入会再次
+	 * put、再次调 trace 钩子，而 repick/p 重入前不复位 ⇒ 钩子再给非 fair/NULL
+	 * 就无限循环且全程持 rq 锁（硬挂）。而且 simple: 标签位于
+	 * #ifdef CONFIG_FAIR_GROUP_SCHED 内，=n 下根本不可见（undeclared label）。
+	 * 正确做法：不是 fair 类就【落到下面的 do-while】。
+	 */
+	if (repick && p && p->sched_class == &fair_sched_class)
 		goto done;
 
 	do {
-		se = pick_next_entity(cfs_rq, NULL);
+		se = hmbird_cb_rescue_se(rq, cfs_rq, NULL);   /* Stage CB (F1) */
+		if (unlikely(!se)) {
+			/*
+			 * Stage CE（CD-3 契约声明）：本条路径在 8066 行已经 put_prev_task()
+			 * 过，返回 NULL 后 core.c 还会替我们 put 一次 ⇒ 这里是【双重 put】。
+			 *
+			 * 为什么不把降级挪到 put 之前：CFS 的 pick_next_entity() 会把
+			 * cfs_rq->curr 当提示用，put_prev_entity() 必须先跑完（它负责把 prev
+			 * 放回树并清 curr），否则 pick 的语义就变了。
+			 *
+			 * 危害面评估：能走到 simple: 说明 prev 不是 fair 类（否则会走上面的
+			 * 快速路径），对 RT/DL 的 put_prev_task 是幂等的（delta≈0）；对厂商
+			 * hmbird 类的幂等性未实测。而且这条分支要求 fair 红黑树【真的为空】
+			 * （rb_first(&rb_root) 也为空），本身已是降级状态，比 panic 好。
+			 * 结论：接受双重 put，不做更危险的重构。
+			 */
+			cfs_rq = &rq->cfs;   /* Stage CD（CB-2）：同上，保证 again: 从根层级重入 */
+			goto idle;
+		}
 		set_next_entity(cfs_rq, se);
 		cfs_rq = group_cfs_rq(se);
 	} while (cfs_rq);
@@ -8016,7 +8145,40 @@ done: __maybe_unused;
 	 * the list, so our cfs_tasks list becomes MRU
 	 * one.
 	 */
-	list_move(&p->se.group_node, &rq->cfs_tasks);
+	#ifdef CONFIG_HMBIRD_SCHED_CORE
+	/*
+	 * Stage BS ★关闭路径崩溃根因修复（P0）★
+	 *
+	 * 实测（opt121/122/123，三次 panic 全部发生在写 scx_enable=0 的瞬间；
+	 * 根因由 _audit/报告-BP-研究.md 定位）：
+	 *   厂商 WALT 模块（sched_walt.ko）的 MVP 抢跑路径
+	 *   walt_cfs_replace_next_task_fair() 会把 mvp 任务交回本函数，
+	 *   使流程落到下面这个 done: 标签 —— 而这里【没有做任何类判定】。
+	 *   于是「一个 hmbird 类任务」的 se.group_node 被 list_move() 挂进了
+	 *   rq->cfs_tasks，可 hmbird 类任务的 se.on_rq 恒为 0、group_node
+	 *   本应永远是自发链（empty）。
+	 *
+	 * 由此 cfs_tasks 中出现「非 fair 类 + se.on_rq==0 + 却已挂链」的任务，之后必坏：
+	 *   - opt122：关闭循环的 sched_change_guard_fini() 用 fair 类重新入队时，
+	 *     enqueue_task_fair 见 se.on_rq==0 便让 account_entity_enqueue 做
+	 *     list_add，而该节点已在表头 ⇒ "list_add double add"；
+	 *   - opt121/123：WALT 的 walt_lb_pull_tasks 遍历 cfs_tasks 抓到它并
+	 *     deactivate_task —— 此时 p->sched_class 仍是 hmbird，hmbird 的
+	 *     dequeue_task 不摘 group_node ⇒ 节点留在表里又被 list_del_init
+	 *     成自发链 ⇒ 下一次 list_add 报 "next->prev should be prev"。
+	 *
+	 * 为什么出厂机型不崩：walt_cfs.c:1593-1598 的 SCX_CALL_OP 转交被
+	 *   if (HMBIRD_GKI_VERSION == get_hmbird_version_type()) 门控并直接 return，
+	 *   MVP 分支根本不执行；本机 DT 没有 /soc/oplus,hmbird 节点（OGKI）⇒ 生效。
+	 * 出厂源码在关闭这条路上与逐字同构 ⇒ 出厂内核同样会崩，只是被那个门挡住了。
+	 *
+	 * cfs_tasks 的 MRU 顺序只对 fair 类任务有意义，因此对该谓词之外的任务
+	 * 跳过这次 list_move 不改变任何调度语义。
+	 * CONFIG_HMBIRD_SCHED_CORE=n（对外发布镜像）时退化为原样一行。
+	 */
+	if (p->sched_class == &fair_sched_class)
+	#endif
+		list_move(&p->se.group_node, &rq->cfs_tasks);
 #endif
 
 	if (hrtick_enabled_fair(rq))
@@ -11718,7 +11880,56 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 	int pulled_task = 0;
 	int done = 0;
 
+	#ifdef CONFIG_HMBIRD_SCHED_CORE
+	/*
+	 * Stage BO ★绕过 WALT 的崩溃路径★
+	 *
+	 * 实测（LAST_KMSG_opt121b.txt，opt121 启用后 18 秒）：
+	 *   pc : walt_lb_pull_tasks+0x1c4/0x75c [sched_walt]
+	 *   Code: f94006b5 eb1402bf 540002c0 f941d6a8 (f8777908)
+	 *   Call trace: walt_lb_pull_tasks ← walt_newidle_balance
+	 *               ← walt_sched_newidle_balance
+	 *               ← __traceiter_android_rvh_sched_newidle_balance
+	 *               ← newidle_balance ← balance_fair ← __schedule
+	 *   Kernel panic - not syncing: Oops: Fatal exception
+	 *
+	 * 故障指令 f8777908 = ldr x8,[x8,x23,lsl#3]，现场 x8=0、x23=0 ⇒ 空指针。
+	 * 机理：WALT 用 prio 判"是不是 fair 任务"（vendor walt.h:1243-1246），
+	 * 而 hmbird 任务的 prio 同样落在 [100,139] ⇒ 被 WALT 当成 fair 任务；
+	 * walt_lb_pull_tasks（vendor walt_lb.c:341-368）遍历 src_rq->cfs_tasks
+	 * 时只过滤亲和性 / task_on_cpu / _walt_can_migrate_task，
+	 * 【没有 sched_class、没有 on_rq、没有 queued 检查】⇒ 会去 deactivate_task
+	 * 一个它本不该触碰的对象，把链表/记账弄坏。
+	 * sched_walt.ko 是预编译厂商模块，我们改不了它；而这里是内核里唯一
+		 * 调用该钩子的地方。该钩子是 DECLARE_RESTRICTED_HOOK(..., 1)，本配置下的
+		 * 注册者只有 WALT 的 walt_sched_newidle_balance —— kernel/oplus_cpu/.../
+		 * sa_balance.c:4309 里那个 oplus_newidle_balance 因
+		 * CONFIG_OPLUS_FEATURE_LOADBALANCE 未开而不编译（sa_balance.o 不存在、
+		 * nm 查不到 __oplus_newidle_balance，已核实）。
+		 * 所以在此处按 hmbird 状态绕过即可。
+	 *
+	 * 代价：hmbird 启用期间不做 WALT 的 newidle 拉任务（那本是公平调度器的
+	 * 空闲均衡优化）。任务调度本身仍由 hmbird 自己的 balance 承担，
+	 * 而 Stage BN 已保证 balance_hmbird 一定被调用。
+	 * CONFIG_HMBIRD_SCHED_CORE=n（对外发布镜像）时本守卫整段不编译。
+	 */
+	{
+		extern atomic_t __hmbird_ops_enabled;
+		extern bool hmbird_transitioning;
+		/*
+		 * Stage BQ：必须同时检查"转换期"。关闭路径在切类循环【之前】就把
+		 * __hmbird_ops_enabled 清零（hmbird.c atomic_set(..., false)），
+		 * 只看该原子量会在这个窗口放行 WALT 的 newidle 钩子，而此刻 hmbird 正在
+		 * 做 hmbird→fair 的类切换 —— 两者同时操作 cfs_tasks 就会损坏链表，
+		 * 这正是 opt121/122/123 三次关闭即崩的根因。
+		 */
+		if (!atomic_read(&__hmbird_ops_enabled) &&
+			!smp_load_acquire(&hmbird_transitioning))
+			trace_android_rvh_sched_newidle_balance(this_rq, rf, &pulled_task, &done);
+	}
+	#else
 	trace_android_rvh_sched_newidle_balance(this_rq, rf, &pulled_task, &done);
+	#endif
 	if (done)
 		return pulled_task;
 

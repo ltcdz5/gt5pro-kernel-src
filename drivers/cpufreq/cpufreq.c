@@ -784,7 +784,10 @@ static ssize_t show_scaling_governor(struct cpufreq_policy *policy, char *buf)
 /*
  * store_scaling_governor - store policy for the specified CPU
  */
-static ssize_t store_scaling_governor(struct cpufreq_policy *policy,
+/* Stage B: the OPPO hmbird sched_class family restores the saved governor
+ * from hmbird_err_exit_workfn(), so this helper cannot stay static.  It is
+ * not exported, so no module symbol can be shadowed. */
+ssize_t store_scaling_governor(struct cpufreq_policy *policy,
 					const char *buf, size_t count)
 {
 	char str_governor[16];
@@ -2620,6 +2623,29 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 		pr_debug("governor limits update\n");
 		cpufreq_governor_limits(policy);
 		return 0;
+	}
+
+	/*
+	 * t93 (opt160) 方案 B：governor 切换的「策略层否决」。
+	 *
+	 * 本树没有 mainline 的 CPUFREQ_ADJUST / CPUFREQ_INCOMPATIBLE（全树
+	 * 0 命中），所以否决点在这里新增。位置选在「同一个 governor 只更新
+	 * 限频」的早退之后、「销毁旧 governor」之前：被否决时
+	 * policy->governor 与旧 governor 实例都不动，调用者拿到 -EBUSY。
+	 *
+	 * v 传的是目标 governor 而不是 policy：此处 policy->governor 仍是旧值
+	 * （:2639 才赋值），否决方需要知道「要切成谁」。
+	 *
+	 * 锁：本调用在 cpufreq_set_policy() 内，向上可能已持有 policy->rwsem
+	 * （:995 store() 的 down_write）；blocking_notifier_call_chain 自身只取
+	 * notifier 链的 rwsem 读锁。因此回调方（hmbird_gov_veto_notify）
+	 * 不允许再取任何锁。
+	 */
+	if (new_gov) {
+		ret = blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
+						   CPUFREQ_GOV_VETO, new_gov);
+		if (ret & NOTIFY_STOP_MASK)
+			return -EBUSY;
 	}
 
 	pr_debug("governor switch\n");

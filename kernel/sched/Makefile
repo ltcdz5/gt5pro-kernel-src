@@ -36,3 +36,8 @@ obj-y += build_policy.o
 obj-y += build_utility.o
 obj-y += hmbird_export.o
 obj-$(CONFIG_ANDROID_VENDOR_HOOKS) += vendor_hooks.o
+
+# OPPO hmbird sched_class core family (Stage A: files only, default n).
+# The family lives in kernel/sched/hmbird/ and is inlined into a single
+# translation unit there, mirroring the upstream build_policy.c layout.
+obj-$(CONFIG_HMBIRD_SCHED_CORE) += hmbird/

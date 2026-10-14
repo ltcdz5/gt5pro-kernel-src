@@ -140,7 +140,7 @@ config SLIM_SCHED
 config HMBIRD_SCHED
 	bool "OPPO hmbird sched (/proc/hmbird_sched hub built into the kernel)"
 	# NOTE: the two helper units this option builds are NOT shipped in this
-	# repository (unclear licence); the option is kept for reference only.
+	# repository (provenance not confirmed); the option is kept for reference only.
 	depends on SCHED_CLASS_EXT
 	default n
 	help
@@ -170,6 +170,38 @@ config HMBIRD_SCHED
 
 	  If unsure, say Y only if hmbird_sched_proc_main.c still matches the
 	  factory-kernel half; otherwise say N.
+
+config HMBIRD_SCHED_CORE
+	bool "OPPO hmbird sched_class core family (Stage A: files only, NOT usable)"
+	depends on HMBIRD_SCHED
+	default n
+	help
+	  Build the 19-file "hmbird sched_class core family" that the OPPO
+	  kernel keeps next to its ext.c fork:
+
+	    kernel/sched/hmbird/{hmbird.c, hmbird_util_track.c,
+	                         hmbird_sched_proc.c, hmbird_shadow_tick.c,
+	                         hmbird_misc.c}
+	    kernel/sched/hmbird.h
+	    include/linux/sched/{hmbird.h, hmbird_proc_val.h,
+	                         hmbird_version.h, sa_common.h,
+	                         sa_common_struct.h, sa_oemdata.h,
+	                         sched_ext.h}
+
+	  Stage A only carries the files and wires them into the build; the
+	  family is NOT usable yet and this switch must stay N:
+
+	    - kernel/sched/core.c is untouched, so nothing splices
+	      hmbird_sched_class into the scheduler (sched_fork,
+	      __pick_next_task, cgroup, sched_setscheduler, ...);
+	    - kernel/sched/ext.c is still the upstream sched_ext, not the
+	      OPPO hmbird_sched/slim_sched fork the family is written against.
+
+	  Enabling it therefore fails to build by design, and neither this
+	  option nor the family it names is usable in this repository: the
+	  files are not shipped (see NOTICE.md section 3).  It is kept only
+	  so that the CONFIG_HMBIRD_SCHED_CORE guards elsewhere in the tree
+	  stay meaningful, and it must stay N.
 
 config SCHED_CLASS_EXT
 	bool "Extensible Scheduling Class"

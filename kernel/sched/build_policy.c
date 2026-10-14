@@ -57,4 +57,11 @@
 #ifdef CONFIG_SCHED_CLASS_EXT
 # include "ext.c"
 
+/*
+ * The OPPO hmbird / slim helper units used to be #include'd here
+ * (slim_sysctl.c, hmbird_sched_proc_main.c), the same way the factory
+ * kernel's build_policy.c does.  Neither unit is shipped in this
+ * repository -- see NOTICE.md section 3 -- so CONFIG_HMBIRD_SCHED has
+ * nothing to build in this tree and the option is kept for reference only.
+ */
 #endif
